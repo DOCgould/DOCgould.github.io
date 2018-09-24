@@ -1,18 +1,36 @@
-<!DOCTYPE html>
-<html>
-<body>
+var camera, scene, renderer;
+var geometry, material, mesh;
 
-<h2>What Can JavaScript Do?</h2>
+init();
+animate();
 
-<p>JavaScript can change HTML attribute values and HELP you stay in contact with friends</p>
+function init() {
 
-<p>In this case JavaScript changes the value of the src (source) attribute of an image MADDIE KEVIN DAVID WILLIAM (hi)</p>
+    camera = new THREE.PerspectiveCamera( 70, window.innerWidth / window.innerHeight, 0.01, 10 );
+    camera.position.z = '.5';
 
-<button onclick="document.getElementById('myImage').src='pic_bulbon.gif'">Turn on the light</button>
+    scene = new THREE.Scene();
 
-<img id="myImage" src="pic_bulboff.gif" style="width:100px">
+    geometry = new THREE.CubeGeometry( 0.2, 0.2, 0.2 );
+    material = new THREE.MeshNormalMaterial();
 
-<button onclick="document.getElementById('myImage').src='pic_bulboff.gif'">Turn off the light</button>
+    mesh = new THREE.Mesh( geometry, material );
+    scene.add( mesh );
 
-</body>
-</html>
+    renderer = new THREE.WebGLRenderer( { antialias: true } );
+    renderer.setSize( window.innerWidth, window.innerHeight );
+    document.body.appendChild( renderer.domElement );
+
+}
+
+function animate() {
+
+    requestAnimationFrame( animate );
+
+    mesh.rotation.x += 0.01;
+    mesh.rotation.y += 0.01;
+    mesh.rotation.z += 0.01;
+
+    renderer.render( scene, camera );
+
+}
