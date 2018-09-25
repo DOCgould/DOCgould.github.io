@@ -41,6 +41,7 @@
 		<script src="js/loaders/3MFLoader.js"></script>
 		<script src="js/controls/OrbitControls.js"></script>
 		<script src="js/libs/jszip.min.js"></script>
+		<scriot src="MODELS/BladeConcept.3MF"></script>
 
 		<script>
 
@@ -81,7 +82,7 @@
 				var pointLight = new THREE.PointLight( 0xffffff, 0.8 );
 				camera.add( pointLight );
 				var loader = new THREE.ThreeMFLoader();
-				loader.load( './MODELS/BladeConcept.3MF', function ( object ) {
+				loader.load( 'MODELS/BladeConcept.3MF', function ( object ) {
 
 					scene.add( object );
 					render();
