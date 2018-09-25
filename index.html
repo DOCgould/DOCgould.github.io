@@ -1,39 +1,115 @@
-<html>
+<!DOCTYPE html>
+<html lang="en">
 	<head>
-		<meta charset=utf-8>
-		<title>Mechatronics Robosub Simulator</title>
+		<title>Mechatronics: Featuring Austin Wulf</title>
+		<meta charset="utf-8">
+		<meta name="viewport" content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
 		<style>
-			body { margin: 0; }
-			canvas { width: 100%; height: 100% }
+			body {
+				font-family: Monospace;
+				background-color: #000000;
+				margin: 0px;
+				overflow: hidden;
+			}
+
+			#info {
+				color: #fff;
+				position: absolute;
+				top: 10px;
+				width: 100%;
+				text-align: center;
+				z-index: 100;
+				display:block;
+
+			}
+
+			a { color: skyblue }
+			.button { background:#999; color:#eee; padding:0.2em 0.5em; cursor:pointer }
+			.highlight { background:orange; color:#fff; }
+
+			span {
+				display: inline-block;
+				width: 60px;
+				float: left;
+				text-align: center;
+			}
+
 		</style>
 	</head>
 	<body>
 		<script src="js/three.js"></script>
+		<script src="js/loaders/3MFLoader.js"></script>
+		<script src="js/controls/OrbitControls.js"></script>
+		<script src="js/libs/jszip.min.js"></script>
+
 		<script>
-			var scene = new THREE.Scene();
-			var camera = new THREE.PerspectiveCamera( 75, window.innerWidth/window.innerHeight, 0.1, 1000 );
 
-			var renderer = new THREE.WebGLRenderer();
-			renderer.setSize( window.innerWidth, window.innerHeight );
-			document.body.appendChild( renderer.domElement );
+			if ( ! Detector.webgl ) Detector.addGetWebGLMessage();
 
-			var geometry = new THREE.BoxGeometry( 1, 1, 1 );
-			var material = new THREE.MeshBasicMaterial( { color: 0x00ff00 } );
-			var cube = new THREE.Mesh( geometry, material );
-			scene.add( cube );
+			var camera, scene, renderer;
 
-			camera.position.z = 5;
+			init();
 
-			var animate = function () {
-				requestAnimationFrame( animate );
+			function init() {
 
-				cube.rotation.x += 0.01;
-				cube.rotation.y += 0.01;
+				renderer = new THREE.WebGLRenderer( { antialias: true } );
+				renderer.setPixelRatio( window.devicePixelRatio );
+				renderer.setSize( window.innerWidth, window.innerHeight );
+				document.body.appendChild( renderer.domElement );
+
+				scene = new THREE.Scene();
+				scene.background = new THREE.Color( 0x333333 );
+
+				scene.add( new THREE.AmbientLight( 0xffffff, 0.2 ) );
+
+				camera = new THREE.PerspectiveCamera( 35, window.innerWidth / window.innerHeight, 1, 500 );
+
+				// Z is up for objects intended to be 3D printed.
+
+				camera.up.set( 0, 0, 1 );
+				camera.position.set( - 80, - 90, 150 );
+				scene.add( camera );
+
+				var controls = new THREE.OrbitControls( camera, renderer.domElement );
+				controls.addEventListener( 'change', render );
+				controls.minDistance = 50;
+				controls.maxDistance = 300;
+				controls.enablePan = false;
+				controls.target.set( 80, 65, 20 );
+				controls.update();
+
+				var pointLight = new THREE.PointLight( 0xffffff, 0.8 );
+				camera.add( pointLight );
+				var loader = new THREE.ThreeMFLoader();
+				loader.load( './MODELS/BladeConcept.3MF', function ( object ) {
+
+					scene.add( object );
+					render();
+
+				} );
+
+				window.addEventListener( 'resize', onWindowResize, false );
+
+			}
+
+			function onWindowResize() {
+
+				camera.aspect = window.innerWidth / window.innerHeight;
+				camera.updateProjectionMatrix();
+
+				renderer.setSize( window.innerWidth, window.innerHeight );
+
+				render();
+
+			}
+
+			function render() {
 
 				renderer.render( scene, camera );
-			};
 
-			animate();
+			}
+
 		</script>
 	</body>
 </html>
+
