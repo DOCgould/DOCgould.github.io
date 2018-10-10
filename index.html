@@ -83,7 +83,7 @@
     // Set the target of the camera to the first imported mesh
 	    var Ship = newMeshes[0];
 	    var DeathStar = Ship.clone("DeathStar");
-	    DeathStar.position = new BABYLON.Vector3(0,0,0);
+	    DeathStar.position = new BABYLON.Vector3.Zero();
 	    Ship.scaling = new BABYLON.Vector3(.01, .01, .01);
 	    Ship.position.y -= 2;
 	    Ship.position.z += 5;
