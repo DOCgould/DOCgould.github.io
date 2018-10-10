@@ -3,7 +3,7 @@
     <head>
         <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
 
-        <title>Zoom Out</title>
+        <title>TESTA</title>
 
         <!-- Babylon.js -->
         <script src="https://code.jquery.com/pep/0.4.2/pep.min.js"></script>
@@ -40,31 +40,62 @@
 <body>
     <canvas id="renderCanvas"></canvas>
     <script>
-        var canvas = document.getElementById("renderCanvas");
+    var canvas = document.getElementById("renderCanvas");
+        
+    var createScene = function () {
 
-        var createScene = function () {
-            var scene = new BABYLON.Scene(engine);
-        
-            //Adding a light
-            var light = new BABYLON.PointLight("Omni", new BABYLON.Vector3(20, 20, 100), scene);
-        
-            //Adding an Arc Rotate Camera
-            var camera = new BABYLON.ArcRotateCamera("Camera", 0, 0.8, 100, BABYLON.Vector3.Zero(), scene);
-            camera.attachControl(canvas, false);
-        
-            // The first parameter can be used to specify which mesh to import. Here we import all meshes
-            BABYLON.SceneLoader.ImportMesh("", "scenes/", "FullHull.stl", scene, function (newMeshes) {
-                // Set the target of the camera to the first imported mesh
-                camera.target = newMeshes[0];
-            });
-        
-            // Move the light with the camera
-            scene.registerBeforeRender(function () {
-                light.position = camera.position;
-            });
-        
-            return scene;
-        }
+    // This creates a basic Babylon Scene object (non-mesh)
+    var scene = new BABYLON.Scene(engine);
+
+    // This creates and positions a free camera (non-mesh)
+    // Parameters : name, position, scene
+    var camera = new BABYLON.UniversalCamera("UniversalCamera", new BABYLON.Vector3(0, 0, -10), scene);
+
+    // Targets the camera to a particular position. In this case the scene origin
+    camera.setTarget(BABYLON.Vector3.Zero());
+
+    // Attach the camera to the canvas
+    camera.attachControl(canvas, true);
+
+    // This creates a light, aiming 0,1,0 - to the sky (non-mesh)
+    var light = new BABYLON.HemisphericLight("light1", new BABYLON.Vector3(0, 1, 0), scene);
+
+    // Default intensity is 1. Let's dim the light a small amount
+    light.intensity = 0.7;
+
+    var sphere = BABYLON.MeshBuilder.CreateSphere("box", {size: 1}, scene);
+
+	//create solid particle system of stationery grey boxes to show movement of box and camera
+    var boxesSPS = new BABYLON.SolidParticleSystem("boxes", scene, {updatable: false});
+    
+    //function to position of grey boxes
+    var set_boxes = function(particle, i, s) {
+        particle.position = new BABYLON.Vector3(-50 + Math.random()*100, -50 + Math.random()*100, -50 + Math.random()*100); 
+    }
+    
+    //add 400 boxes
+    boxesSPS.addShape(sphere, 400, {positionFunction:set_boxes});  
+    var boxes = boxesSPS.buildMesh(); // mesh of boxes
+    // Our built-in 'ground' shape. Params: name, width, depth, subdivs, scene
+            
+    // The first parameter can be used to specify which mesh to import. Here we import all meshes
+    BABYLON.SceneLoader.ImportMesh("", "SAVE_SPACE/scenes/", "FullHull.stl", scene, function (newMeshes) {
+    // Set the target of the camera to the first imported mesh
+        var Ship = newMeshes[0];
+	    Ship.position.y -= .9;
+	    Ship.position.z += 6;
+	    Ship.parent = camera
+        camera.target = Ship;
+    });
+            
+    //var ground = BABYLON.Mesh.CreateGround("ground1", 2, 2, 1, scene);
+	//ground.position.y -= .9;
+	//ground.position.z += 6;
+	//ground.parent = camera
+
+    return scene;
+
+};
         
         var engine = new BABYLON.Engine(canvas, true, { preserveDrawingBuffer: true, stencil: true });
         var scene = createScene();
@@ -82,3 +113,6 @@
     </script>
 </body>
 </html>
+
+
+
