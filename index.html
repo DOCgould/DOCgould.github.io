@@ -82,6 +82,7 @@
     BABYLON.SceneLoader.ImportMesh("", "SAVE_SPACE/scenes/", "FullHull.stl", scene, function (newMeshes) {
     // Set the target of the camera to the first imported mesh
 	    var Ship = newMeshes[0];
+	    var DeathStar = newMeshes[0];
 	    Ship.scaling = new BABYLON.Vector3(.01, .01, .01);
 	    Ship.position.y -= 2;
 	    Ship.position.z += 5;
