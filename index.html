@@ -81,12 +81,16 @@
     // The first parameter can be used to specify which mesh to import. Here we import all meshes
     BABYLON.SceneLoader.ImportMesh("", "SAVE_SPACE/scenes/", "FullHull.stl", scene, function (newMeshes) {
     // Set the target of the camera to the first imported mesh
-        var Ship = newMeshes[0].scaling.multiply(new BABYLON.Vector3(.001, .001, .001));;
-	    Ship.position.y -= .9;
-	    Ship.position.z += 6;
+	    var Ship = newMeshes[0];
+	    var DeathStar = Ship.clone("DeathStar");
+	    DeathStar.position = new BABYLON.Vector3.Zero();
+	    Ship.scaling = new BABYLON.Vector3(.01, .01, .01);
+	    Ship.position.y -= 2;
+	    Ship.position.z += 5;
 	    Ship.parent = camera
-        camera.target = Ship;
+       	    camera.target = Ship;
     });
+	    
             
     //var ground = BABYLON.Mesh.CreateGround("ground1", 2, 2, 1, scene);
 	//ground.position.y -= .9;
