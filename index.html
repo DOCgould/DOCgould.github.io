@@ -91,7 +91,7 @@
        	    camera.target = Ship;
     });
 	        // The first parameter can be used to specify which mesh to import. Here we import all meshes
-    BABYLON.SceneLoader.ImportMesh("", "SAVE_SPACE/scenes/", "Layout.stl", scene, function (newMeshes) {
+    BABYLON.SceneLoader.ImportMesh("", "SAVE_SPACE/scenes/", "skull.babylon", scene, function (newMeshes) {
     // Set the target of the camera to the first imported mesh
 	    var Ship = newMeshes[0];
 	    Ship.position = new BABYLON.Vector3.Zero();
