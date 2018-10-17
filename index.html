@@ -79,7 +79,7 @@
     // Our built-in 'ground' shape. Params: name, width, depth, subdivs, scene
             
     // The first parameter can be used to specify which mesh to import. Here we import all meshes
-    BABYLON.SceneLoader.ImportMesh("", "SAVE_SPACE/scenes/", "Blade_Prototype.stl", scene, function (newMeshes) {
+    BABYLON.SceneLoader.ImportMesh("", "SAVE_SPACE/scenes/", "skull.babylon", scene, function (newMeshes) {
     // Set the target of the camera to the first imported mesh
 	    var Ship = newMeshes[0];
 	    var DeathStar = Ship.clone("DeathStar");
