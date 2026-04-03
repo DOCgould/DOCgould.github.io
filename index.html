@@ -1,277 +1,355 @@
 <!DOCTYPE html>
 <html>
-<head>
-    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
-    <title>Robotics Submarine Flight Computer</title>
-    <script src="https://cdn.babylonjs.com/babylon.js"></script>
-    <script src="https://cdn.babylonjs.com/gui/babylon.gui.min.js"></script>
-    <style>
-        html, body {
-            overflow: hidden;
-            width: 100%;
-            height: 100%;
-            margin: 0;
-            padding: 0;
-            font-family: 'Courier New', Courier, monospace;
-            background-color: #000; /* Prevents white flash before load */
-        }
-        #renderCanvas {
-            width: 100%;
-            height: 100%;
-            touch-action: none;
-            outline: none;
-        }
-    </style>
-</head>
+    <head>
+        <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+        <title>Robotics Submarine Flight Computer</title>
+
+        <!-- Babylon.js — pinned to stable 6.x which keeps legacy APIs -->
+        <script src="https://code.jquery.com/pep/0.4.2/pep.min.js"></script>
+        <script src="https://cdn.babylonjs.com/ammo.js"></script>
+        <script src="https://cdn.babylonjs.com/cannon.js"></script>
+        <script src="https://cdn.babylonjs.com/Oimo.js"></script>
+        <script src="https://cdn.babylonjs.com/earcut.min.js"></script>
+        <script src="https://cdn.babylonjs.com/babylon.js"></script>
+        <script src="https://cdn.babylonjs.com/inspector/babylon.inspector.bundle.js"></script>
+        <script src="https://cdn.babylonjs.com/materialsLibrary/babylonjs.materials.min.js"></script>
+        <script src="https://cdn.babylonjs.com/proceduralTexturesLibrary/babylonjs.proceduralTextures.min.js"></script>
+        <script src="https://cdn.babylonjs.com/postProcessesLibrary/babylonjs.postProcess.min.js"></script>
+        <script src="https://cdn.babylonjs.com/loaders/babylonjs.loaders.min.js"></script>
+        <script src="https://cdn.babylonjs.com/serializers/babylonjs.serializers.min.js"></script>
+        <script src="https://cdn.babylonjs.com/gui/babylon.gui.min.js"></script>
+
+        <style>
+            html, body {
+                overflow: hidden;
+                width: 100%;
+                height: 100%;
+                margin: 0;
+                padding: 0;
+            }
+
+            #renderCanvas {
+                width: 100%;
+                height: 100%;
+                touch-action: none;
+            }
+        </style>
+    </head>
 <body>
     <canvas id="renderCanvas"></canvas>
     <script>
-        /** 
-         * ROBOTICS FLIGHT COMPUTER V2.1 (Fixed)
-         * -------------------------------------
-         * Controls:
-         * Mouse: Look Around (Pitch/Yaw)
-         * Up Arrow: Thrust Forward
-         * Down Arrow: Thrust Brake
-         * 'C': Toggle Course Lock (Auto-level)
-         * '1': Heavy Submarine Variant
-         * '2': Recon AUV Variant
-         */
+        var canvas = document.getElementById("renderCanvas");
 
-        const canvas = document.getElementById("renderCanvas");
-        const engine = new BABYLON.Engine(canvas, true, { preserveDrawingBuffer: true, stencil: true });
+        var engine = null;
+        var scene = null;
+        var sceneToRender = null;
+        var createDefaultEngine = function() {
+            return new BABYLON.Engine(canvas, true, { preserveDrawingBuffer: true, stencil: true });
+        };
 
-        // --- Constants & State ---
-        const BVec3 = BABYLON.Vector3;
-        let autoCourse = false;
-        let activeVariantIndex = 0;
-        let currentShipMesh = null;
-        let speed = 0;
-        
-        // --- Vehicle Variants Configuration ---
-        const VARIANTS = [
-            { 
-                name: "MK-1 Heavy Submarine", 
-                speedMax: 1.2, 
-                acceleration: 0.005, 
-                turnSpeed: 0.00005, 
-                inertia: 0.98, 
-                drag: 0.003, 
-                color: new BABYLON.Color3(0.2, 0.4, 0.8),
-                meshType: "box" // Simple representation
-            },
-            { 
-                name: "MK-2 Recon AUV", 
-                speedMax: 2.8, 
-                acceleration: 0.012, 
-                turnSpeed: 0.0001, 
-                inertia: 0.96, 
-                drag: 0.008, 
-                color: new BABYLON.Color3(0.9, 0.2, 0.2),
-                meshType: "torpedo"
-            }
-        ];
+        //////////////////////////////////////////////////////////////////
+        ///////////        Flight Simulator        ///////////////////////
+        ///// Click to toggle course Lock.
+        ///// Up Arrow to accelerate.
+        ///// Down Arrow to decelerate.
+        ///// Mouse as aircraft stick or yoke:
+        ///// Mouse up/down = pitch.
+        ///// Mouse Left/right = ailerons with coupled rudder.
+        /////////////////////////////////////////////////////////////////
+        ///// No physics here!
+        ///// No gravity. No aerodynamics. Will not stall. Will not crash.
+        /////////////////////////////////////////////////////////////////
 
-        // --- Input State ---
-        let inputThrust = 0;
-        let mouseX = 0, mouseY = 0;
+        // ── DynamicTerrain: rawgit.com is gone; use jsDelivr mirror instead ──
+        var url = "https://cdn.jsdelivr.net/gh/BabylonJS/Extensions@master/DynamicTerrain/dist/babylon.dynamicTerrain.min.js";
+        var s = document.createElement("script");
+        s.src = url;
+        document.head.appendChild(s);
 
-        const createScene = function() {
-            const scene = new BABYLON.Scene(engine);
-            
-            // Dark Underwater Atmosphere
-            scene.clearColor = new BABYLON.Color4(0.02, 0.05, 0.1, 1); 
+        var BVec3 = BABYLON.Vector3;
+        var autoCourse = true;
+
+        var createScene = function() {
+            var scene = new BABYLON.Scene(engine);
+            var camera = new BABYLON.UniversalCamera("camera1", BVec3.Zero(), scene);
+
+            createTerrain(scene);
+
+            camera.position.set(128.0, 30, 0);
+            camera.rotation.set(0, PI / 4, 0);
+            camera.minZ = .1;
+            camera.maxZ = 1111;
+
             scene.fogMode = BABYLON.Scene.FOGMODE_EXP2;
-            scene.fogDensity = 0.002;
-            scene.fogColor = new BABYLON.Color3(0.05, 0.1, 0.15);
+            scene.fogColor = new BABYLON.Color3(0.7, .7, 0.7);
+            scene.fogDensity = 0.001;
 
-            // Camera
-            const camera = new BABYLON.UniversalCamera("camera", new BVec3(0, 10, -20), scene);
-            camera.setTarget(BVec3.Zero());
-            camera.attachControl(canvas, true);
-            camera.minZ = 0.5;
-            camera.maxZ = 1500;
+            camera.detachControl(canvas);
 
-            // Lighting
-            const light = new BABYLON.HemisphericLight("light1", new BVec3(0, -1, 0), scene);
-            light.intensity = 0.6;
-            light.groundColor = new BABYLON.Color3(0.1, 0.2, 0.3);
+            var light = new BABYLON.HemisphericLight("light1", new BVec3(0.7, .2, 0), scene);
+            light.specular = new BABYLON.Color3(1, 1, 1);
 
-            const spotLight = new BABYLON.SpotLight("spotLight", new BVec3(0, 0, 0), new BVec3(0, 0, 1), Math.PI / 3, 20, scene);
-            spotLight.intensity = 2.0; // Headlights
-            spotLight.parent = camera;
+            var yyaw = 0,
+                thrust = 0,
+                speed = .7,
+                winCntrX = engine.getRenderWidth(true) / 2,
+                winCntrY = engine.getRenderHeight(true) / 2,
+                renderCanvas = document.getElementById("renderCanvas");
 
-            // Terrain
-            createProceduralTerrain(scene);
+            window.addEventListener("resize", function() {
+                engine.resize();
+                winCntrX = engine.getRenderWidth(true) / 2;
+                winCntrY = engine.getRenderHeight(true) / 2;
+            });
 
-            // Initial Ship
-            switchVehicle(0, scene, camera);
+            window.addEventListener("click", function() { autoCourse = !autoCourse; });
 
-            // HUD
-            createHUD(scene, camera);
-
-            // Input Mapping
-            window.addEventListener("keydown", (e) => {
-                switch (e.key) {
-                    case "ArrowUp": inputThrust = 1; break;
-                    case "ArrowDown": inputThrust = -0.5; break;
-                    case "c": autoCourse = !autoCourse; break;
-                    case "1": switchVehicle(0, scene, camera); break;
-                    case "2": switchVehicle(1, scene, camera); break;
+            renderCanvas.onkeydown = function(e) {
+                switch (e.which || e.keyCode) {
+                    case 37: yyaw = -.004; return;
+                    case 39: yyaw = .004; return;
+                    case 38: thrust = .005; return;
+                    case 40: thrust = -.007; return;
                 }
+            };
+
+            renderCanvas.onkeyup = function(e) {
+                switch (e.which || e.keyCode) {
+                    case 37:
+                    case 39: yyaw = 0; return;
+                    case 38:
+                    case 40: thrust = 0; return;
+                    case 67: autoCourse = !autoCourse;
+                }
+            };
+
+            // ── Ship model (graceful fail if STL not found) ──
+            BABYLON.SceneLoader.ImportMesh("", "SAVE_SPACE/scenes/", "FullHull.stl", scene, function(newMeshes) {
+                if (!newMeshes || newMeshes.length === 0) return;
+                var Ship = newMeshes[0];
+                Ship.scaling = new BABYLON.Vector3(.01, .01, .01);
+                Ship.position.y -= 2;
+                Ship.position.z += 5;
+                Ship.setPivotMatrix(BABYLON.Matrix.Translation(0, 0, -3, 1));
+                Ship.parent = camera;
             });
 
-            window.addEventListener("keyup", (e) => {
-                if (e.key === "ArrowUp" || e.key === "ArrowDown") inputThrust = 0;
-            });
+            // ── Horizon ring — MeshBuilder.CreateLines replaces deprecated Mesh.CreateLines ──
+            var horizon = BABYLON.MeshBuilder.CreateLines("horizon", {
+                points: [
+                    new BVec3(-400, 0, 800),
+                    new BVec3(400,  0,  800),
+                    new BVec3(800,  0,  0),
+                    new BVec3(400,  0, -800),
+                    new BVec3(-400, 0, -800),
+                    new BVec3(-800, 0,  0),
+                    new BVec3(-400, 0,  800)
+                ]
+            }, scene);
+            horizon.enableEdgesRendering();
+            horizon.edgesWidth = 77;
+            horizon.edgesColor = new BABYLON.Color4(0, 1, 1, 1);
 
-            // Main Logic Loop
-            scene.onBeforeRenderObservable.add(() => {
-                const variant = VARIANTS[activeVariantIndex];
-                
-                // 1. Input Processing
+            // ── Attitude indicator — MeshBuilder.CreateLines ──
+            var yawPitchNDKTR = BABYLON.MeshBuilder.CreateLines("yawPitchNDKTR", {
+                points: [
+                    new BVec3(-.3, 0,  3),
+                    new BVec3(.3,  0,  3),
+                    new BVec3(0,   0,  3),
+                    new BVec3(0,   0,  3.2),
+                    new BVec3(0,   0,  2.5),
+                    new BVec3(.1,  0,  2.5),
+                    new BVec3(-.1, 0,  2.5),
+                    new BVec3(0,   0,  2.5),
+                    new BVec3(0,  .1,  2.5)
+                ]
+            }, scene);
+            yawPitchNDKTR.enableEdgesRendering();
+            yawPitchNDKTR.edgesWidth = 1;
+            yawPitchNDKTR.edgesColor = new BABYLON.Color4(0, 0, 0, 1);
+            yawPitchNDKTR.setPivotMatrix(BABYLON.Matrix.Translation(0, 0, -3.1));
+            yawPitchNDKTR.parent = camera;
+
+            // ── Dashboard — MeshBuilder.CreatePlane replaces deprecated Mesh.CreatePlane ──
+            var gauges = BABYLON.MeshBuilder.CreatePlane("outputplane", { size: 1 }, scene);
+            gauges.scaling.x = .1;
+            gauges.scaling.y = .1;
+            var gaugesTexture = new BABYLON.DynamicTexture("dynamic texture", 666, scene, true);
+            var gaugecontext = gaugesTexture.getContext();
+            gauges.material = new BABYLON.StandardMaterial("outputplane", scene);
+            gauges.material.emissiveTexture = gaugesTexture;
+            gauges.material.diffuseTexture = gaugesTexture;
+            gauges.position.set(-.3, -.25, 1);
+            gauges.parent = camera;
+
+            ///////////////////////////////////////////////////////////////// !
+            addYawPitchRollFunction(camera, 1);
+            ///////////////////////////////////////////////////////////////// !
+
+            var yawRate = .000007,
+                pitchRate = .00001,
+                yaw = 0,
+                roll = 0,
+                pitch = 0,
+                mx = 0, my = 0,
+                frontV = new BVec3(0, 0, 1),
+                thrustDir = new BVec3();
+
+            // ── Single render loop (removed the duplicate loop that existed outside createScene) ──
+            engine.runRenderLoop(function() {
+                mx = scene.pointerX - winCntrX;
+                my = scene.pointerY - winCntrY;
+
                 if (autoCourse) {
-                    // Auto-Level Logic: Dampen rotations
-                    camera.rotation.x *= 0.95;
-                    camera.rotation.z *= 0.95;
-                } else {
-                    // Mouse Control
-                    // Assumes camera is attached to canvas inputs for simpler controls
+                    my = camera.rotation.x * 111;
+                    mx = camera.rotation.z * 111;
                 }
 
-                // 2. Physics Update
-                speed = speed * variant.inertia + (inputThrust * variant.acceleration);
-                
-                // Apply Drag
-                if (inputThrust === 0 && speed > 0.01) speed -= variant.drag;
+                yawPitchNDKTR.rotation.y = mx / 4444;
+                yawPitchNDKTR.x = -my / 4444;
+
+                pitch = my * pitchRate;
+                yaw = mx * yawRate;
+                camera.autoBank(yaw, pitch, speed);
+
+                camera.getDirectionToRef(frontV, thrustDir);
+                camera.position.addInPlace(thrustDir.scale(speed));
+
+                speed += thrust;
                 if (speed < 0) speed = 0;
-                if (speed > variant.speedMax) speed = variant.speedMax;
+                if (speed > 3.3) speed = 3.3;
 
-                // 3. Movement
-                // Move camera forward based on its view direction
-                // Getting forward vector properly
-                const forward = camera.getDirection(BVec3.Left()).scale(-1); 
-                // Note: Babylon Camera Forward() method varies by version, manual vector is safer:
-                // Matrix based forward:
-                const transformMatrix = camera.getWorldMatrix();
-                const forwardDir = new BVec3();
-                BVec3.TransformNormalToRef(BVec3.Left(), transformMatrix, forwardDir); // Left Hack for Z-Forward
-                // Or just use standard logic:
-                
-                // Standard Flight Sim Movement:
-                const moveDir = camera.getDirection(new BVec3(0,0,1)); // Z is usually forward in flight sims
-                
-                // Apply Movement
-                camera.position.addInPlace(moveDir.scale(speed));
+                gaugecontext.clearRect(0, 0, 666, 666);
+                gaugesTexture.drawText("Speed: "   + (310 * speed).toFixed(),                               null, 100, "80px verdana", "LightGreen", null);
+                gaugesTexture.drawText("Heading: " + (360 * unwrapAngle(camera.rotation.y) / TWO_PI).toFixed(), null, 220, "80px verdana", "LightGreen", null);
+                gaugesTexture.drawText("Altitude: "+ (10  * camera.position.y).toFixed(),                   null, 340, "80px verdana", "LightGreen", null);
+                gaugesTexture.drawText("Lat: "     + (camera.position.z).toFixed(),                         null, 460, "80px verdana", "LightGreen", null);
+                gaugesTexture.drawText("Lon: "     + (camera.position.x).toFixed(),                         null, 580, "80px verdana", "LightGreen", null);
 
-                // 4. Vehicle Visual Update
-                if (currentShipMesh) {
-                    // Bobbing effect
-                    currentShipMesh.position.y = -0.15 + Math.sin(performance.now() * 0.005) * 0.01;
-                    // Propeller spin based on speed
-                    if (variant.meshType === "torpedo") {
-                         currentShipMesh.rotation.y += speed * 0.5; 
-                    }
-                }
+                horizon.position = camera.position;
+
+                scene.render();
             });
 
             return scene;
         };
 
-        function createProceduralTerrain(scene) {
-            // Simple Ground
-            const ground = BABYLON.MeshBuilder.CreateGround("terrain", { width: 2000, height: 2000, subdivisions: 50 }, scene);
-            const positions = ground.getVerticesData(BABYLON.VertexBuffer.PositionKind);
-            
-            // Create Hills
-            for (let i = 0; i < positions.length; i += 3) {
-                const x = positions[i];
-                const z = positions[i + 2];
-                // Simple noise function
-                positions[i + 1] = (Math.sin(x * 0.05) + Math.cos(z * 0.05)) * 8.0;
+
+        function addYawPitchRollFunction(ob, gravity) {
+            ob.rotationQuaternion = new BABYLON.Quaternion();
+            ob.rotationQuaternion = BABYLON.Quaternion.RotationYawPitchRoll(ob.rotation.y, ob.rotation.x, ob.rotation.z);
+            ob.myGrav = gravity;
+
+            ob.yawPitchRoll = function(yaw, pitch, roll) {
+                var axis = new BVec3(0, 0, -1);
+                var partRotQuat = new BABYLON.Quaternion();
+
+                BABYLON.Quaternion.RotationAxisToRef(axis, roll, partRotQuat);
+                this.rotationQuaternion.multiplyInPlace(partRotQuat);
+
+                BABYLON.Quaternion.RotationAxisToRef(axis.set(-1, 0, 0), pitch, partRotQuat);
+                this.rotationQuaternion.multiplyInPlace(partRotQuat);
+
+                BABYLON.Quaternion.RotationAxisToRef(axis.set(0, 1, 0), yaw, partRotQuat);
+                this.rotationQuaternion.multiplyInPlace(partRotQuat);
+
+                this.rotationQuaternion.toEulerAnglesToRef(this.rotation);
+            };
+
+            ob.autoBank = function(yaw, pitch, speed) {
+                var axis = new BVec3(0, 0, -1);
+                var partRotQuat = new BABYLON.Quaternion();
+
+                var roll = Math.atan2(-yaw * 222 * speed, this.myGrav);
+                this.rotationQuaternion = BABYLON.Quaternion.RotationYawPitchRoll(this.rotation.y, this.rotation.x, roll);
+
+                BABYLON.Quaternion.RotationAxisToRef(axis.set(-1, 0, 0), pitch, partRotQuat);
+                this.rotationQuaternion.multiplyInPlace(partRotQuat);
+
+                BABYLON.Quaternion.RotationAxisToRef(axis.set(0, 1, 0), yaw, partRotQuat);
+                this.rotationQuaternion.multiplyInPlace(partRotQuat);
+
+                this.rotationQuaternion.toEulerAnglesToRef(this.rotation);
+            };
+
+            ob.clearYawPitchRoll = function() {
+                this.rotationQuaternion.set(0, 0, 0, 1);
+                this.rotation.set(0, 0, 0);
+            };
+        }
+
+
+        function createTerrain(sceen) {
+            var mapSubX = 1024;
+            var mapSubZ = 1024;
+            var cx, cy, cz;
+            var treeHeight = 11;
+            var mapData   = new Float32Array(mapSubX * mapSubZ * 3);
+            var mapColors = new Float32Array(mapSubX * mapSubZ * 3);
+
+            for (var l = 0; l < mapSubZ; l++) {
+                for (var w = 0; w < mapSubX; w++) {
+                    var x = (w - mapSubX * 0.5) * 2.0;
+                    var z = (l - mapSubZ * 0.5) * 2.0;
+                    var y = (Math.abs(x * z) % 97) / 97;
+                    y *= y * treeHeight;
+                    y += (Math.sin(x * .0245) + .5) * 17 + (Math.sin(z * .0245) + .5) * 17;
+
+                    mapData[3 * (l * mapSubX + w)]     = x;
+                    mapData[3 * (l * mapSubX + w) + 1] = y;
+                    mapData[3 * (l * mapSubX + w) + 2] = z;
+
+                    cx = Math.sin(x / 101) + .5;
+                    cy = Math.sin((x + y + z) / 47) + .5;
+                    cz = Math.sin(z / 107) + .5;
+
+                    mapColors[3 * (l * mapSubX + w)]     = cx;
+                    mapColors[3 * (l * mapSubX + w) + 1] = cy;
+                    mapColors[3 * (l * mapSubX + w) + 2] = cz;
+                }
             }
-            
-            ground.updateVerticesData(BABYLON.VertexBuffer.PositionKind, positions);
-            ground.computeVertexNormals();
 
-            const mat = new BABYLON.StandardMaterial("groundMat", scene);
-            mat.diffuseColor = new BABYLON.Color3(0.1, 0.15, 0.1); // Dark Green/Black
-            mat.specularColor = new BABYLON.Color3(0, 0, 0);
-            ground.material = mat;
+            s.onload = function() {
+                var terrainSub = 256;
+                var params = {
+                    mapData:   mapData,
+                    mapColors: mapColors,
+                    mapSubX:   mapSubX,
+                    mapSubZ:   mapSubZ,
+                    terrainSub: terrainSub
+                };
+                var terrain = new BABYLON.DynamicTerrain("t", params, sceen);
+                terrain.LODLimits = [4, 3, 2, 2, 1, 1, 1, 1];
+                terrain.updateCameraLOD = function(terrainCamera) {
+                    return Math.abs((terrainCamera.globalPosition.y / 30.0) | 0);
+                };
+            };
         }
 
-        function switchVehicle(index, scene, camera) {
-            if (currentShipMesh) currentShipMesh.dispose();
-            
-            activeVariantIndex = index;
-            const config = VARIANTS[index];
 
-            if (index === 0) {
-                // Heavy Sub
-                currentShipMesh = BABYLON.MeshBuilder.CreateBox("sub", { width: 0.5, height: 0.25, depth: 1.5 }, scene);
-                const tower = BABYLON.MeshBuilder.CreateBox("tower", { width: 0.15, height: 0.4, depth: 0.15 }, scene);
-                tower.position.y = 0.3;
-                tower.position.z = -0.2;
-                tower.parent = currentShipMesh;
-            } else {
-                // Recon AUV (Torpedo shape)
-                currentShipMesh = BABYLON.MeshBuilder.CreateCylinder("auv", { height: 1.8, diameterTop: 0.05, diameterBottom: 0.4, tessellation: 12 }, scene);
-                currentShipMesh.rotation.x = Math.PI / 2;
-                currentShipMesh.rotation.y = Math.PI;
-            }
+        var PI = Math.PI, TWO_PI = 2 * PI;
 
-            const mat = new BABYLON.StandardMaterial("shipMat", scene);
-            mat.emissiveColor = config.color;
-            currentShipMesh.material = mat;
-
-            currentShipMesh.parent = camera;
-            currentShipMesh.position = new BVec3(0, -0.2, 1.5); // Cockpit view offset
+        function unwrapAngle(a) {
+            if (a > TWO_PI) return a - TWO_PI;
+            else if (a < 0) return a + TWO_PI;
+            return a;
         }
 
-        function createHUD(scene, camera) {
-            const advancedTexture = BABYLON.GUI.AdvancedDynamicTexture.CreateFullscreenUI("UI", true, scene);
-            
-            const panel = new BABYLON.GUI.StackPanel();
-            panel.horizontalAlignment = BABYLON.GUI.Control.HORIZONTAL_ALIGNMENT_LEFT;
-            panel.verticalAlignment = BABYLON.GUI.Control.VERTICAL_ALIGNMENT_TOP;
-            panel.left = "20px";
-            panel.top = "20px";
-            advancedTexture.addControl(panel);
 
-            const header = new BABYLON.GUI.TextBlock();
-            header.text = "ONBOARD FLIGHT COMPUTER";
-            header.color = "LimeGreen";
-            header.fontSize = 24;
-            panel.addControl(header);
-
-            const statusText = new BABYLON.GUI.TextBlock();
-            statusText.color = "White";
-            statusText.fontSize = 18;
-            statusText.height = "30px";
-            panel.addControl(statusText);
-
-            // Update Loop for HUD
-            scene.onBeforeRenderObservable.add(() => {
-                const variant = VARIANTS[activeVariantIndex];
-                const depth = camera.position.y.toFixed(1);
-                const spd = (speed * 50).toFixed(1); // Scale for realism
-
-                statusText.text = 
-                    `MODE: ${autoCourse ? "AUTO-LEVEL" : "MANUAL"} \n` +
-                    `VEHICLE: ${variant.name} \n` +
-                    `DEPTH: ${depth}m \n` +
-                    `SPEED: ${spd} knots`;
-            });
+        var engine;
+        try {
+            engine = createDefaultEngine();
+        } catch(e) {
+            console.log("createEngine failed, using default:", e);
+            engine = createDefaultEngine();
         }
+        if (!engine) throw 'engine should not be null.';
 
-        // --- Start ---
-        const scene = createScene();
+        scene = createScene();
+        sceneToRender = scene;
 
-        engine.runRenderLoop(() => {
-            scene.render();
-        });
-
-        window.addEventListener("resize", () => {
+        // Resize handler only — render loop is already started inside createScene()
+        window.addEventListener("resize", function() {
             engine.resize();
         });
     </script>
