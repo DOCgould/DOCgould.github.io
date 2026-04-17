@@ -1,0 +1,11 @@
+# Rust build artifacts (the compiled .wasm is checked in under assets/)
+wasm-src/target/
+wasm-src/Cargo.lock
+
+# local dev
+node_modules/
+package-lock.json
+
+# screenshots / smoke scripts
+inspect*.mjs
+*.png

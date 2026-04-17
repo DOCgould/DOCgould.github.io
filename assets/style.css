@@ -1,0 +1,298 @@
+/* CFC-510 terminal aesthetic.
+ * Phosphor green on near-black, VT323 + IBM Plex Mono, scanlines + subtle
+ * flicker + vignette. prefers-reduced-motion and .safe-mode disable the
+ * motion layer; .rad-glitch plays the radiation-hit keyframes.
+ */
+
+:root {
+  --fg: #33ff99;
+  --fg-dim: #1f9961;
+  --fg-bright: #a8ffd0;
+  --bg: #040806;
+  --bg-panel: #071410;
+  --accent: #ffcc33;
+  --danger: #ff5566;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: "VT323", "IBM Plex Mono", "Consolas", monospace;
+  font-size: 20px;
+  line-height: 1.25;
+  overflow: hidden;
+}
+
+/* Crawler / no-JS path: visible as normal, then hidden once JS boots. */
+.js-loaded .static-resume { display: none !important; }
+.static-resume {
+  max-width: 820px;
+  margin: 2rem auto;
+  padding: 0 1rem;
+  color: var(--fg);
+  font-family: "IBM Plex Mono", Consolas, monospace;
+  font-size: 15px;
+  line-height: 1.55;
+}
+.static-resume h1 { color: var(--fg-bright); }
+.static-resume h2 { color: var(--accent); margin-top: 1.4rem; }
+.static-resume h3 { color: var(--fg); margin-top: 1rem; }
+.static-resume ul { padding-left: 1.2rem; }
+.static-resume a { color: var(--fg-bright); }
+
+/* Top bar */
+.topbar {
+  position: fixed; top: 0; left: 0; right: 0; height: 28px;
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 0 12px;
+  background: linear-gradient(to bottom, #0a2418, #061310);
+  border-bottom: 1px solid var(--fg-dim);
+  font-family: "VT323", monospace;
+  font-size: 18px;
+  color: var(--fg-bright);
+  z-index: 30;
+  letter-spacing: 0.02em;
+}
+.topbar .left, .topbar .right { display: flex; gap: 14px; align-items: center; }
+.topbar [data-status] { color: var(--accent); }
+.topbar [data-status][data-state="degraded"] { color: var(--danger); }
+.topbar button {
+  background: transparent;
+  color: var(--fg-bright);
+  border: 1px solid var(--fg-dim);
+  padding: 1px 8px;
+  font-family: inherit;
+  font-size: 16px;
+  cursor: pointer;
+}
+.topbar button:hover { background: rgba(51, 255, 153, 0.1); }
+
+/* Main terminal area */
+.terminal {
+  position: absolute;
+  top: 28px; left: 0; right: 0; bottom: 0;
+  padding: 14px 18px 120px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--fg);
+  text-shadow: 0 0 2px rgba(51, 255, 153, 0.4), 0 0 8px rgba(51, 255, 153, 0.15);
+  z-index: 10;
+}
+.terminal [data-out] { display: block; white-space: pre-wrap; }
+.terminal [data-out] * { white-space: pre-wrap; }
+.terminal .line { display: inline; }
+.input-line {
+  display: flex; align-items: baseline; gap: 0;
+  margin-top: 4px;
+}
+.input-line [data-prompt] { color: var(--fg-bright); }
+.input-line input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--fg);
+  font-family: inherit;
+  font-size: inherit;
+  caret-color: var(--fg-bright);
+}
+
+/* Blinking cursor when input is focused (only shown via CSS-only trick). */
+.input-line::after {
+  content: "";
+}
+
+/* Bottom-right SVG sub viewport */
+.sub-port {
+  position: fixed; right: 16px; bottom: 16px;
+  width: 220px;
+  color: var(--fg);
+  z-index: 20;
+  pointer-events: none;
+  opacity: 0.85;
+  text-align: right;
+}
+.sub-svg {
+  width: 100%;
+  height: auto;
+  animation: subspin 28s linear infinite;
+  filter: drop-shadow(0 0 6px rgba(51, 255, 153, 0.25));
+}
+.sub-caption {
+  font-family: "VT323", monospace;
+  font-size: 15px;
+  color: var(--fg-dim);
+  margin-top: 4px;
+}
+
+/* Scanlines + vignette (CRT) */
+.crt-layer {
+  position: fixed; inset: 0;
+  pointer-events: none;
+  z-index: 40;
+}
+.crt-layer::before {
+  content: "";
+  position: absolute; inset: 0;
+  background: repeating-linear-gradient(
+    to bottom,
+    rgba(0, 0, 0, 0) 0px,
+    rgba(0, 0, 0, 0) 2px,
+    rgba(0, 0, 0, 0.15) 3px,
+    rgba(0, 0, 0, 0.15) 3px
+  );
+  mix-blend-mode: multiply;
+}
+.crt-layer::after {
+  content: "";
+  position: absolute; inset: 0;
+  background: radial-gradient(
+    ellipse at center,
+    rgba(0,0,0,0) 50%,
+    rgba(0,0,0,0.55) 100%
+  );
+}
+.crt-flicker {
+  position: fixed; inset: 0;
+  pointer-events: none;
+  z-index: 41;
+  background: rgba(51,255,153,0.02);
+  animation: flicker 180ms infinite alternate;
+}
+
+@keyframes flicker {
+  0%   { opacity: 0.4; }
+  30%  { opacity: 0.8; }
+  60%  { opacity: 0.2; }
+  100% { opacity: 0.7; }
+}
+
+@keyframes subspin {
+  from { transform: rotate3d(1, 0.4, 0, 0deg); }
+  to   { transform: rotate3d(1, 0.4, 0, 360deg); }
+}
+
+/* rad-glitch: briefly jitter the screen on `radiate` */
+.rad-glitch .terminal {
+  animation: glitch 160ms steps(2, end);
+}
+.rad-glitch .crt-layer::before { opacity: 0.3; }
+@keyframes glitch {
+  0%   { transform: translate(0, 0); filter: none; }
+  20%  { transform: translate(-3px, 1px); filter: hue-rotate(40deg) saturate(2); }
+  40%  { transform: translate(2px, -2px); filter: invert(0.3) hue-rotate(-30deg); }
+  60%  { transform: translate(-1px, 2px); filter: hue-rotate(100deg) contrast(1.4); }
+  80%  { transform: translate(1px, -1px); filter: none; }
+  100% { transform: translate(0, 0); filter: none; }
+}
+
+/* Safe mode / reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  .crt-layer, .crt-flicker { display: none !important; }
+  .sub-svg { animation: none !important; }
+}
+body.safe-mode .crt-layer,
+body.safe-mode .crt-flicker { display: none !important; }
+body.safe-mode .sub-svg { animation: none !important; }
+body.safe-mode .terminal { text-shadow: none; }
+body.safe-mode {
+  --fg: #c0ffe0;
+  --bg: #000000;
+}
+
+/* v86 modal */
+.v86-modal {
+  position: fixed; inset: 0;
+  background: rgba(0, 0, 0, 0.72);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 60;
+  padding: 20px;
+}
+.v86-frame {
+  width: min(920px, 100%);
+  max-height: 90vh;
+  background: var(--bg-panel);
+  border: 1px solid var(--fg-dim);
+  box-shadow: 0 0 32px rgba(51, 255, 153, 0.15);
+  display: flex; flex-direction: column;
+  color: var(--fg);
+}
+.v86-titlebar {
+  display: flex; justify-content: space-between;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--fg-dim);
+  background: #0a2418;
+  color: var(--fg-bright);
+  font-family: "VT323", monospace;
+}
+.v86-close {
+  background: transparent;
+  color: var(--fg-bright);
+  border: 1px solid var(--fg-dim);
+  font-family: inherit;
+  cursor: pointer;
+  padding: 0 8px;
+}
+.v86-status {
+  padding: 4px 10px;
+  font-family: "VT323", monospace;
+  font-size: 16px;
+  color: var(--accent);
+  border-bottom: 1px solid var(--fg-dim);
+}
+.v86-screen {
+  background: #000;
+  overflow: auto;
+  min-height: 360px;
+  max-height: 60vh;
+  padding: 6px;
+}
+.v86-screen-inner {
+  color: #c0ffc0;
+}
+.v86-screen-inner > div {
+  white-space: pre;
+  font-family: "VT323", "IBM Plex Mono", monospace;
+  font-size: 16px;
+  line-height: 1.15;
+  color: #c0ffc0;
+}
+.v86-screen pre {
+  margin: 0;
+  font-family: "IBM Plex Mono", Consolas, monospace;
+  color: var(--fg);
+  font-size: 13px;
+}
+.v86-footnote {
+  padding: 6px 10px;
+  font-size: 14px;
+  color: var(--fg-dim);
+  border-top: 1px solid var(--fg-dim);
+  font-family: "VT323", monospace;
+}
+
+/* Mobile passive tour */
+@media (max-width: 768px) {
+  html, body { font-size: 16px; }
+  .terminal { padding: 10px 12px 80px; }
+  .sub-port { width: 140px; right: 8px; bottom: 8px; opacity: 0.7; }
+  .input-line { display: none !important; }
+  .topbar { font-size: 14px; height: 24px; padding: 0 8px; }
+  .topbar .left span.long { display: none; }
+  .v86-modal { padding: 6px; }
+  .v86-screen-inner > div { font-size: 14px; }
+}
+
+/* Scrollbar styling */
+.terminal::-webkit-scrollbar { width: 8px; }
+.terminal::-webkit-scrollbar-thumb { background: var(--fg-dim); }
+.terminal::-webkit-scrollbar-track { background: var(--bg); }
+
+/* Selection */
+::selection { background: var(--fg); color: var(--bg); }

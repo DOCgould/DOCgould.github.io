@@ -1,357 +1,205 @@
-<!DOCTYPE html>
-<html>
-    <head>
-        <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
-        <title>Robotics Submarine Flight Computer</title>
-
-        <!-- Babylon.js — pinned to stable 6.x which keeps legacy APIs -->
-        <script src="https://code.jquery.com/pep/0.4.2/pep.min.js"></script>
-        <script src="https://cdn.babylonjs.com/ammo.js"></script>
-        <script src="https://cdn.babylonjs.com/cannon.js"></script>
-        <script src="https://cdn.babylonjs.com/Oimo.js"></script>
-        <script src="https://cdn.babylonjs.com/earcut.min.js"></script>
-        <script src="https://cdn.babylonjs.com/babylon.js"></script>
-        <script src="https://cdn.babylonjs.com/inspector/babylon.inspector.bundle.js"></script>
-        <script src="https://cdn.babylonjs.com/materialsLibrary/babylonjs.materials.min.js"></script>
-        <script src="https://cdn.babylonjs.com/proceduralTexturesLibrary/babylonjs.proceduralTextures.min.js"></script>
-        <script src="https://cdn.babylonjs.com/postProcessesLibrary/babylonjs.postProcess.min.js"></script>
-        <script src="https://cdn.babylonjs.com/loaders/babylonjs.loaders.min.js"></script>
-        <script src="https://cdn.babylonjs.com/serializers/babylonjs.serializers.min.js"></script>
-        <script src="https://cdn.babylonjs.com/gui/babylon.gui.min.js"></script>
-
-        <style>
-            html, body {
-                overflow: hidden;
-                width: 100%;
-                height: 100%;
-                margin: 0;
-                padding: 0;
-            }
-
-            #renderCanvas {
-                width: 100%;
-                height: 100%;
-                touch-action: none;
-            }
-        </style>
-    </head>
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+  <title>Christian Gould — Flight Computer Terminal</title>
+  <meta name="description" content="Christian Gould — flight-computer software architect. Radiation-tolerant embedded systems, AI at the edge, FPGA-accelerated Linux. Interactive resume terminal.">
+  <meta name="author" content="Christian Gould">
+  <meta name="theme-color" content="#040806">
+  <meta property="og:title" content="Christian Gould — Flight Computer Terminal">
+  <meta property="og:description" content="Interactive resume running in an emulated flight-computer shell. Rust → WebAssembly + free LLM narrator + real Linux in-browser via v86.">
+  <meta property="og:type" content="website">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=VT323&family=IBM+Plex+Mono:wght@400;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="assets/style.css">
+</head>
 <body>
-    <canvas id="renderCanvas"></canvas>
-    <script>
-        var canvas = document.getElementById("renderCanvas");
 
-        var engine = null;
-        var scene = null;
-        var sceneToRender = null;
-        var createDefaultEngine = function() {
-            return new BABYLON.Engine(canvas, true, { preserveDrawingBuffer: true, stencil: true });
-        };
+<!-- Top bar (hidden to crawlers via role; decorative) -->
+<header class="topbar" role="presentation" aria-hidden="true">
+  <div class="left">
+    <span>INNOFLIGHT CFC-510</span>
+    <span class="long">BUS 3V3 NOMINAL</span>
+    <span class="long" data-telem-temp>TEMP 41°C</span>
+    <span class="long" data-telem-dose>RAD 0.12 krad</span>
+    <span class="long">UPLINK ACQUIRED</span>
+  </div>
+  <div class="right">
+    <span data-status data-state="ok">STATUS :: OK</span>
+    <button type="button" data-safe-mode>SAFE MODE</button>
+  </div>
+</header>
 
-        //////////////////////////////////////////////////////////////////
-        ///////////        Flight Simulator        ///////////////////////
-        ///// Click to toggle course Lock.
-        ///// Up Arrow to accelerate.
-        ///// Down Arrow to decelerate.
-        ///// Mouse as aircraft stick or yoke:
-        ///// Mouse up/down = pitch.
-        ///// Mouse Left/right = ailerons with coupled rudder.
-        /////////////////////////////////////////////////////////////////
-        ///// No physics here!
-        ///// No gravity. No aerodynamics. Will not stall. Will not crash.
-        /////////////////////////////////////////////////////////////////
+<!-- Terminal (populated by JS) -->
+<main class="terminal" data-term tabindex="0" aria-label="CFC-510 terminal">
+  <div data-out role="log" aria-live="polite"></div>
+  <div class="input-line">
+    <span data-prompt></span>
+    <input data-input autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="command" disabled>
+  </div>
+</main>
 
-        // ── DynamicTerrain: rawgit.com is gone; use jsDelivr mirror instead ──
-        var url = "https://cdn.jsdelivr.net/gh/BabylonJS/Extensions@master/DynamicTerrain/dist/babylon.dynamicTerrain.min.js";
-        var s = document.createElement("script");
-        s.src = url;
-        document.head.appendChild(s);
+<!-- Corner submarine wireframe -->
+<aside class="sub-port" data-sub aria-hidden="true"></aside>
 
-        var BVec3 = BABYLON.Vector3;
-        var autoCourse = true;
+<!-- CRT effects layer -->
+<div class="crt-layer" aria-hidden="true"></div>
+<div class="crt-flicker" aria-hidden="true"></div>
 
-        var createScene = function() {
-            var scene = new BABYLON.Scene(engine);
-            var camera = new BABYLON.UniversalCamera("camera1", BVec3.Zero(), scene);
+<!-- Static resume for crawlers / no-JS visitors. Hidden once JS boots. -->
+<noscript>
+  <style>
+    .terminal, .topbar, .sub-port, .crt-layer, .crt-flicker { display: none !important; }
+    body { overflow: auto !important; }
+  </style>
+</noscript>
+<main class="static-resume">
+  <h1>Christian Gould</h1>
+  <p><em>Flight-computer software architect &mdash; radiation-tolerant embedded systems, AI at the edge, FPGA-accelerated Linux.</em></p>
+  <p>
+    <strong>Email:</strong> <a href="mailto:christian.d.gould@gmail.com">christian.d.gould@gmail.com</a><br>
+    <strong>Location:</strong> San Diego, California
+  </p>
 
-            createTerrain(scene);
+  <h2>Experience</h2>
 
-            camera.position.set(128.0, 30, 0);
-            camera.rotation.set(0, PI / 4, 0);
-            camera.minZ = .1;
-            camera.maxZ = 1111;
+  <h3>Innoflight, LLC &mdash; Technical Lead / Software Architect (2020 &ndash; Present)</h3>
+  <p><strong>CFC510 AMD Flight Computer (Lead Engineer):</strong> Designed the x86 real-time stack merging radiation-tolerant embedded computing with high-performance AI inference for space missions. Built the company's first ROCm-capable space computer (TensorFlow on AMD V1605B APU). Custom BIOS for deterministic boot. Multi-layer NAND ECC + software-defined wear-leveling. FPGA-supervised DMA snapshots for rollback. Adaptive reboot tuned per-orbit. Custom PCIe driver stack between APU and PolarFire FPGA.</p>
 
-            scene.fogMode = BABYLON.Scene.FOGMODE_EXP2;
-            scene.fogColor = new BABYLON.Color3(0.7, .7, 0.7);
-            scene.fogDensity = 0.001;
+  <p><strong>CFC600 AMD Versal (System Architect):</strong> Heterogeneous model combining Versal AIE acceleration with real-time Linux. Software-controlled dynamic partitioning of AI / FPGA / CPU against telemetry. Multi-layer software TMR across heterogeneous compute. Distributed system-state validation with automatic radiation-fault recovery. Cryptographically authenticated firmware updates with FPGA-assisted rollback protection.</p>
 
-            camera.detachControl(canvas);
+  <p><strong>MPE-600 (Systems Lead &amp; 10-person team coordinator):</strong> Fault-tolerant multiprocessor platform. Multi-master comms, HA failover, automated firmware validation, CI/CD.</p>
 
-            var light = new BABYLON.HemisphericLight("light1", new BVec3(0.7, .2, 0), scene);
-            light.specular = new BABYLON.Color3(1, 1, 1);
+  <p><strong>CFC500 Nvidia Jetson (Optimization):</strong> TensorFlow Lite GPU delegate for CUDA 6.5. Dual-TK1 split across real-time + security-update workloads. PCIe BAR + scatter-gather tuning. Assisted Heavy-Ion + Proton SEE radiation validation.</p>
 
-            var yyaw = 0,
-                thrust = 0,
-                speed = .7,
-                winCntrX = engine.getRenderWidth(true) / 2,
-                winCntrY = engine.getRenderHeight(true) / 2,
-                renderCanvas = document.getElementById("renderCanvas");
+  <p><strong>Embedded R&amp;D &amp; Cyber IDS:</strong> FPGA-based acceleration framework. Embedded Intrusion Detection System built on computational geometry and graph analysis. Resilient firmware integrity via cryptographic signing + redundant storage.</p>
 
-            window.addEventListener("resize", function() {
-                engine.resize();
-                winCntrX = engine.getRenderWidth(true) / 2;
-                winCntrY = engine.getRenderHeight(true) / 2;
-            });
+  <h3>San Diego State University Mechatronics &mdash; AUV Lead (2019 &ndash; 2021)</h3>
+  <p>Software Lead + Project Manager on the Perseverance AUV. OpenCV vision for underwater obstacle recognition. ARM + PIC coprocessors for sensor ingest and thruster control. REST API to the Jetson TX2 SoM. LXC + docker containerization on primary navigation processors. Re-implemented navigation hot path in C via CPython.</p>
 
-            window.addEventListener("click", function() { autoCourse = !autoCourse; });
+  <h2>Publications</h2>
+  <ul>
+    <li>Walker-Howell P, Gould C, et al. &ldquo;2019-2020: SDSU Mechatronics AUV (Scion): Design and Implementation.&rdquo; AUVSI 17th RoboSub Competition Journal Papers, August 2020.</li>
+    <li>Gomez S, Gould C, et al. &ldquo;2020-2021: SDSU Mechatronics AUV (Pico): Design and Implementation.&rdquo; AUVSI 17th RoboSub Competition Journal Papers, August 2021.</li>
+  </ul>
 
-            renderCanvas.onkeydown = function(e) {
-                switch (e.which || e.keyCode) {
-                    case 37: yyaw = -.004; return;
-                    case 39: yyaw = .004; return;
-                    case 38: thrust = .005; return;
-                    case 40: thrust = -.007; return;
-                }
-            };
+  <h2>Education</h2>
+  <p>
+    San Diego State University &mdash; <strong>B.S. Applied Mathematics, Computer Science Emphasis</strong>.<br>
+    Coursework: Machine Learning, Distributed Systems, Coding Theory, Algebraic Geometry, Chaotic Systems, Optimization.<br>
+    Teaching Assistant for Object-Oriented Programming (C++, Python, Java).
+  </p>
 
-            renderCanvas.onkeyup = function(e) {
-                switch (e.which || e.keyCode) {
-                    case 37:
-                    case 39: yyaw = 0; return;
-                    case 38:
-                    case 40: thrust = 0; return;
-                    case 67: autoCourse = !autoCourse;
-                }
-            };
+  <h2>Skills</h2>
+  <ul>
+    <li><strong>Programming &amp; HDL:</strong> Bash, Python, C, C++, Rust, VHDL, SystemVerilog. Linux kernel modules + FPGA logic.</li>
+    <li><strong>Embedded Compute / Acceleration:</strong> TensorFlow, PyTorch, OpenCV, OpenMPI, CUDA, YOLO/Darknet, Xilinx HLS, FPGA acceleration.</li>
+    <li><strong>Embedded Systems &amp; Security:</strong> Secure boot, cryptographic integrity verification, Linux kernel dev, FreeRTOS, Yocto/Buildroot, UEFI.</li>
+    <li><strong>AI &amp; Edge Inference:</strong> Model optimization, real-time inference, batch execution, power-efficient AI.</li>
+    <li><strong>Hardware &amp; Platforms:</strong> NVIDIA Jetson (TK1/TX1/TX2/Xavier), Xilinx Zynq/MPSoC/Versal, Microsemi PolarFire, AMD Embedded Ryzen (V1000/R1000), RISC-V, ARM Cortex-A/R/M.</li>
+  </ul>
 
-            // ── Ship model (graceful fail if STL not found) ──
-            BABYLON.SceneLoader.ImportMesh("", "SAVE_SPACE/scenes/", "FullHull.stl", scene, function(newMeshes) {
-                if (!newMeshes || newMeshes.length === 0) return;
-                var Ship = newMeshes[0];
-                Ship.scaling = new BABYLON.Vector3(.01, .01, .01);
-                Ship.position.y -= 2;
-                Ship.position.z += 5;
-                Ship.setPivotMatrix(BABYLON.Matrix.Translation(0, 0, -3, 1));
-                Ship.parent = camera;
-            });
+  <p><small>This plain-HTML block is what crawlers and non-JS visitors see. The interactive terminal above is the primary experience.</small></p>
+</main>
 
-            // ── Horizon ring — MeshBuilder.CreateLines replaces deprecated Mesh.CreateLines ──
-            var horizon = BABYLON.MeshBuilder.CreateLines("horizon", {
-                points: [
-                    new BVec3(-400, 0, 800),
-                    new BVec3(400,  0,  800),
-                    new BVec3(800,  0,  0),
-                    new BVec3(400,  0, -800),
-                    new BVec3(-400, 0, -800),
-                    new BVec3(-800, 0,  0),
-                    new BVec3(-400, 0,  800)
-                ]
-            }, scene);
-            horizon.enableEdgesRendering();
-            horizon.edgesWidth = 77;
-            horizon.edgesColor = new BABYLON.Color4(0, 1, 1, 1);
+<!-- Main app -->
+<script type="module">
+  import { initWasm } from "./assets/wasm-loader.js";
+  import { mountSubSvg } from "./assets/sub-svg.js";
+  import { Terminal } from "./assets/term.js";
+  import { runBoot } from "./assets/boot.js";
+  import { handle } from "./assets/shell.js";
+  import { narrate as llmNarrate } from "./assets/llm.js";
+  import { procFs } from "./assets/resume-data.js";
 
-            // ── Attitude indicator — MeshBuilder.CreateLines ──
-            var yawPitchNDKTR = BABYLON.MeshBuilder.CreateLines("yawPitchNDKTR", {
-                points: [
-                    new BVec3(-.3, 0,  3),
-                    new BVec3(.3,  0,  3),
-                    new BVec3(0,   0,  3),
-                    new BVec3(0,   0,  3.2),
-                    new BVec3(0,   0,  2.5),
-                    new BVec3(.1,  0,  2.5),
-                    new BVec3(-.1, 0,  2.5),
-                    new BVec3(0,   0,  2.5),
-                    new BVec3(0,  .1,  2.5)
-                ]
-            }, scene);
-            yawPitchNDKTR.enableEdgesRendering();
-            yawPitchNDKTR.edgesWidth = 1;
-            yawPitchNDKTR.edgesColor = new BABYLON.Color4(0, 0, 0, 1);
-            yawPitchNDKTR.setPivotMatrix(BABYLON.Matrix.Translation(0, 0, -3.1));
-            yawPitchNDKTR.parent = camera;
+  // Mark JS loaded → CSS hides the static resume.
+  document.documentElement.classList.add("js-loaded");
+  document.body.classList.add("js-loaded");
 
-            // ── Dashboard — MeshBuilder.CreatePlane replaces deprecated Mesh.CreatePlane ──
-            var gauges = BABYLON.MeshBuilder.CreatePlane("outputplane", { size: 1 }, scene);
-            gauges.scaling.x = .1;
-            gauges.scaling.y = .1;
-            var gaugesTexture = new BABYLON.DynamicTexture("dynamic texture", 666, scene, true);
-            var gaugecontext = gaugesTexture.getContext();
-            gauges.material = new BABYLON.StandardMaterial("outputplane", scene);
-            gauges.material.emissiveTexture = gaugesTexture;
-            gauges.material.diffuseTexture = gaugesTexture;
-            gauges.position.set(-.3, -.25, 1);
-            gauges.parent = camera;
+  // Safe-mode toggle
+  const safeBtn = document.querySelector("[data-safe-mode]");
+  const applySafe = (on) => {
+    document.body.classList.toggle("safe-mode", on);
+    safeBtn.textContent = on ? "STD MODE" : "SAFE MODE";
+    try { localStorage.setItem("cfc.safeMode", on ? "1" : "0"); } catch {}
+  };
+  safeBtn.addEventListener("click", () => applySafe(!document.body.classList.contains("safe-mode")));
+  try {
+    if (localStorage.getItem("cfc.safeMode") === "1") applySafe(true);
+  } catch {}
+  if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) applySafe(true);
 
-            ///////////////////////////////////////////////////////////////// !
-            addYawPitchRollFunction(camera, 1);
-            ///////////////////////////////////////////////////////////////// !
+  // Fake telemetry jitter
+  const tempEl = document.querySelector("[data-telem-temp]");
+  const doseEl = document.querySelector("[data-telem-dose]");
+  setInterval(() => {
+    if (tempEl) tempEl.textContent = `TEMP ${(40 + Math.random() * 3).toFixed(1)}°C`;
+    if (doseEl) doseEl.textContent = `RAD ${(0.10 + Math.random() * 0.08).toFixed(2)} krad`;
+  }, 1600);
 
-            var yawRate = .000007,
-                pitchRate = .00001,
-                yaw = 0,
-                roll = 0,
-                pitch = 0,
-                mx = 0, my = 0,
-                frontV = new BVec3(0, 0, 1),
-                thrustDir = new BVec3();
+  // Mount the corner submarine SVG
+  mountSubSvg(document.querySelector("[data-sub]"));
 
-            // ── Single render loop (removed the duplicate loop that existed outside createScene) ──
-            engine.runRenderLoop(function() {
-                mx = scene.pointerX - winCntrX;
-                my = scene.pointerY - winCntrY;
+  // Init WASM in parallel with boot
+  const wasmReady = initWasm();
 
-                if (autoCourse) {
-                    my = camera.rotation.x * 111;
-                    mx = camera.rotation.z * 111;
-                }
+  // Create the terminal and wire up the shell
+  const root = document.querySelector("[data-term]");
+  const term = new Terminal(root);
+  term.onSubmit = (cmd) => handle(cmd, term);
 
-                yawPitchNDKTR.rotation.y = mx / 4444;
-                yawPitchNDKTR.x = -my / 4444;
+  // Global error handler → flag top bar
+  window.addEventListener("error", (e) => {
+    const s = document.querySelector("[data-status]");
+    if (s) { s.textContent = "STATUS :: DEGRADED — runtime"; s.dataset.state = "degraded"; }
+    console.error("[cfc]", e.error || e.message);
+  });
+  window.addEventListener("unhandledrejection", (e) => {
+    console.warn("[cfc] unhandled rejection", e.reason);
+  });
 
-                pitch = my * pitchRate;
-                yaw = mx * yawRate;
-                camera.autoBank(yaw, pitch, speed);
+  // --- Boot flow ---
+  await wasmReady;
+  await runBoot(term);
 
-                camera.getDirectionToRef(frontV, thrustDir);
-                camera.position.addInPlace(thrustDir.scale(speed));
+  // Mobile passive tour
+  const isMobile = matchMedia("(max-width: 768px)").matches;
+  if (isMobile) {
+    term.lock();
+    await runPassiveTour(term);
+    term.print("\n[passive tour] complete. reload to replay.\n\n");
+  } else {
+    // Auto-narrate on boot — the site "rattles off details" unprompted.
+    // Terminal stays locked during streaming so input doesn't interleave.
+    term.lock();
+    term.print("cfc-oracle> ");
+    try {
+      await llmNarrate(ch => term.print(ch));
+    } catch (e) { /* fallback handled inside llmNarrate */ }
+    term.print("\n\n");
+    term.print("type 'help' to interact, or 'narrate' for another.\n\n");
+    term.unlock();
+  }
 
-                speed += thrust;
-                if (speed < 0) speed = 0;
-                if (speed > 3.3) speed = 3.3;
+  async function runPassiveTour(t) {
+    await handle("whoami", t);
+    await sleep(1200);
+    await handle("experience Innoflight", t);
+    await sleep(1200);
+    await handle("publications", t);
+    await sleep(800);
+    t.print("cfc-oracle> ");
+    try { await llmNarrate(ch => t.print(ch)); } catch {}
+    t.print("\n\n");
+    await sleep(800);
+    t.print("cfc-oracle> ");
+    try { await llmNarrate(ch => t.print(ch)); } catch {}
+    t.print("\n\n");
+  }
+  function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+</script>
 
-                gaugecontext.clearRect(0, 0, 666, 666);
-                gaugesTexture.drawText("Speed: "   + (310 * speed).toFixed(),                               null, 100, "80px verdana", "LightGreen", null);
-                gaugesTexture.drawText("Heading: " + (360 * unwrapAngle(camera.rotation.y) / TWO_PI).toFixed(), null, 220, "80px verdana", "LightGreen", null);
-                gaugesTexture.drawText("Altitude: "+ (10  * camera.position.y).toFixed(),                   null, 340, "80px verdana", "LightGreen", null);
-                gaugesTexture.drawText("Lat: "     + (camera.position.z).toFixed(),                         null, 460, "80px verdana", "LightGreen", null);
-                gaugesTexture.drawText("Lon: "     + (camera.position.x).toFixed(),                         null, 580, "80px verdana", "LightGreen", null);
-
-                horizon.position = camera.position;
-
-                scene.render();
-            });
-
-            return scene;
-        };
-
-
-        function addYawPitchRollFunction(ob, gravity) {
-            ob.rotationQuaternion = new BABYLON.Quaternion();
-            ob.rotationQuaternion = BABYLON.Quaternion.RotationYawPitchRoll(ob.rotation.y, ob.rotation.x, ob.rotation.z);
-            ob.myGrav = gravity;
-
-            ob.yawPitchRoll = function(yaw, pitch, roll) {
-                var axis = new BVec3(0, 0, -1);
-                var partRotQuat = new BABYLON.Quaternion();
-
-                BABYLON.Quaternion.RotationAxisToRef(axis, roll, partRotQuat);
-                this.rotationQuaternion.multiplyInPlace(partRotQuat);
-
-                BABYLON.Quaternion.RotationAxisToRef(axis.set(-1, 0, 0), pitch, partRotQuat);
-                this.rotationQuaternion.multiplyInPlace(partRotQuat);
-
-                BABYLON.Quaternion.RotationAxisToRef(axis.set(0, 1, 0), yaw, partRotQuat);
-                this.rotationQuaternion.multiplyInPlace(partRotQuat);
-
-                this.rotationQuaternion.toEulerAnglesToRef(this.rotation);
-            };
-
-            ob.autoBank = function(yaw, pitch, speed) {
-                var axis = new BVec3(0, 0, -1);
-                var partRotQuat = new BABYLON.Quaternion();
-
-                var roll = Math.atan2(-yaw * 222 * speed, this.myGrav);
-                this.rotationQuaternion = BABYLON.Quaternion.RotationYawPitchRoll(this.rotation.y, this.rotation.x, roll);
-
-                BABYLON.Quaternion.RotationAxisToRef(axis.set(-1, 0, 0), pitch, partRotQuat);
-                this.rotationQuaternion.multiplyInPlace(partRotQuat);
-
-                BABYLON.Quaternion.RotationAxisToRef(axis.set(0, 1, 0), yaw, partRotQuat);
-                this.rotationQuaternion.multiplyInPlace(partRotQuat);
-
-                this.rotationQuaternion.toEulerAnglesToRef(this.rotation);
-            };
-
-            ob.clearYawPitchRoll = function() {
-                this.rotationQuaternion.set(0, 0, 0, 1);
-                this.rotation.set(0, 0, 0);
-            };
-        }
-
-
-        function createTerrain(sceen) {
-            var mapSubX = 1024;
-            var mapSubZ = 1024;
-            var cx, cy, cz;
-            var treeHeight = 11;
-            var mapData   = new Float32Array(mapSubX * mapSubZ * 3);
-            var mapColors = new Float32Array(mapSubX * mapSubZ * 3);
-
-            for (var l = 0; l < mapSubZ; l++) {
-                for (var w = 0; w < mapSubX; w++) {
-                    var x = (w - mapSubX * 0.5) * 2.0;
-                    var z = (l - mapSubZ * 0.5) * 2.0;
-                    var y = (Math.abs(x * z) % 97) / 97;
-                    y *= y * treeHeight;
-                    y += (Math.sin(x * .0245) + .5) * 17 + (Math.sin(z * .0245) + .5) * 17;
-
-                    mapData[3 * (l * mapSubX + w)]     = x;
-                    mapData[3 * (l * mapSubX + w) + 1] = y;
-                    mapData[3 * (l * mapSubX + w) + 2] = z;
-
-                    cx = Math.sin(x / 101) + .5;
-                    cy = Math.sin((x + y + z) / 47) + .5;
-                    cz = Math.sin(z / 107) + .5;
-
-                    mapColors[3 * (l * mapSubX + w)]     = cx;
-                    mapColors[3 * (l * mapSubX + w) + 1] = cy;
-                    mapColors[3 * (l * mapSubX + w) + 2] = cz;
-                }
-            }
-
-            s.onload = function() {
-                var terrainSub = 256;
-                var params = {
-                    mapData:   mapData,
-                    mapColors: mapColors,
-                    mapSubX:   mapSubX,
-                    mapSubZ:   mapSubZ,
-                    terrainSub: terrainSub
-                };
-                var terrain = new BABYLON.DynamicTerrain("t", params, sceen);
-                terrain.LODLimits = [4, 3, 2, 2, 1, 1, 1, 1];
-                terrain.updateCameraLOD = function(terrainCamera) {
-                    return Math.abs((terrainCamera.globalPosition.y / 30.0) | 0);
-                };
-            };
-        }
-
-
-        var PI = Math.PI, TWO_PI = 2 * PI;
-
-        function unwrapAngle(a) {
-            if (a > TWO_PI) return a - TWO_PI;
-            else if (a < 0) return a + TWO_PI;
-            return a;
-        }
-
-
-        var engine;
-        try {
-            engine = createDefaultEngine();
-        } catch(e) {
-            console.log("createEngine failed, using default:", e);
-            engine = createDefaultEngine();
-        }
-        if (!engine) throw 'engine should not be null.';
-
-        scene = createScene();
-        sceneToRender = scene;
-
-        // Resize handler only — render loop is already started inside createScene()
-        window.addEventListener("resize", function() {
-            engine.resize();
-        });
-    </script>
 </body>
 </html>
