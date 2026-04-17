@@ -269,6 +269,23 @@ body.safe-mode {
   color: var(--fg);
   font-size: 13px;
 }
+.v86-serial {
+  margin: 0;
+  background: #000;
+  color: #c0ffc0;
+  font-family: "IBM Plex Mono", Consolas, monospace;
+  font-size: 13px;
+  line-height: 1.25;
+  padding: 10px 12px;
+  max-height: 40vh;
+  min-height: 120px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  border-top: 1px solid var(--fg-dim);
+  outline: none;
+}
+.v86-serial:focus { box-shadow: inset 0 0 0 1px var(--accent); }
 .v86-footnote {
   padding: 6px 10px;
   font-size: 14px;

@@ -9,3 +9,5 @@ package-lock.json
 # screenshots / smoke scripts
 inspect*.mjs
 *.png
+# ...but keep pngs committed under assets/ (site imagery like ducksy)
+!assets/**/*.png

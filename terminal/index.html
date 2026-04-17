@@ -1,0 +1,990 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>cgould // wasm terminal</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css" />
+<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin />
+<style>
+  :root {
+    --bg: #0b0f0a;
+    --fg: #b6ffb0;
+    --dim: #4a7a4a;
+    --accent: #7cffb2;
+    --warn: #ffd166;
+    --err: #ff6b6b;
+  }
+  html, body {
+    margin: 0; height: 100%;
+    background: radial-gradient(ellipse at center, #0e1610 0%, #050805 100%);
+    color: var(--fg);
+    font-family: "JetBrains Mono", "Fira Code", ui-monospace, Menlo, Consolas, monospace;
+    overflow: hidden;
+  }
+  body::before {
+    content: "";
+    position: fixed; inset: 0;
+    background: repeating-linear-gradient(
+      to bottom,
+      rgba(0,0,0,0) 0px,
+      rgba(0,0,0,0) 2px,
+      rgba(0,0,0,0.18) 3px,
+      rgba(0,0,0,0) 4px
+    );
+    pointer-events: none;
+    z-index: 5;
+    mix-blend-mode: multiply;
+  }
+  body::after {
+    content: "";
+    position: fixed; inset: 0;
+    background: radial-gradient(ellipse at center, rgba(0,0,0,0) 60%, rgba(0,0,0,0.55) 100%);
+    pointer-events: none;
+    z-index: 6;
+  }
+  @keyframes flicker {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.97; }
+  }
+  #screen {
+    position: absolute; inset: 24px;
+    border: 1px solid #1f2a1f;
+    border-radius: 14px;
+    box-shadow:
+      0 0 0 1px #0a0f0a inset,
+      0 0 60px rgba(124, 255, 178, 0.08) inset,
+      0 0 80px rgba(0,0,0,0.7);
+    padding: 18px 16px 14px;
+    background: rgba(6, 10, 6, 0.85);
+    animation: flicker 4s infinite;
+    display: flex; flex-direction: column;
+  }
+  #titlebar {
+    display: flex; align-items: center; gap: 10px;
+    font-size: 12px; color: var(--dim);
+    padding-bottom: 10px; border-bottom: 1px dashed #1f2a1f; margin-bottom: 10px;
+  }
+  .dot { width: 10px; height: 10px; border-radius: 50%; background: #2a3a2a; box-shadow: 0 0 6px #2a3a2a; }
+  .dot.on { background: var(--accent); box-shadow: 0 0 10px var(--accent); }
+  #term { flex: 1; min-height: 0; }
+  #statusline {
+    font-size: 11px; color: var(--dim);
+    padding-top: 8px; border-top: 1px dashed #1f2a1f; margin-top: 8px;
+    display: flex; gap: 14px; align-items: center;
+  }
+  #statusline .pane { padding: 0 6px; border: 1px solid transparent; border-radius: 3px; }
+  #statusline .pane.active { color: var(--accent); border-color: #1f2a1f; background: rgba(124,255,178,0.06); }
+  .xterm .xterm-viewport { background-color: transparent !important; }
+  ::selection { background: var(--accent); color: var(--bg); }
+</style>
+</head>
+<body>
+  <div id="screen">
+    <div id="titlebar">
+      <div class="dot on"></div><div class="dot"></div><div class="dot"></div>
+      <span>tty1 — cgould@github.io:~</span>
+      <span style="margin-left:auto;">linux / v86 / wasm</span>
+    </div>
+    <div id="term"></div>
+    <div id="statusline">
+      <span id="pane-host" class="pane active">[0] host</span>
+      <span id="pane-linux" class="pane">[1] linux</span>
+      <span style="margin-left:auto;">ctrl-b d: detach · ctrl-b n: next pane</span>
+    </div>
+  </div>
+
+<script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/xterm-addon-webgl@0.16.0/lib/xterm-addon-webgl.js"></script>
+<script type="module">
+import { bootV86 } from "../assets/v86-boot.js";
+import { identity } from "../assets/resume-data.js";
+
+(async () => {
+  const term = new Terminal({
+    cursorBlink: true,
+    fontFamily: '"JetBrains Mono","Fira Code",ui-monospace,Menlo,monospace',
+    fontSize: 14,
+    lineHeight: 1.15,
+    theme: {
+      background: 'rgba(0,0,0,0)',
+      foreground: '#b6ffb0',
+      cursor: '#7cffb2',
+      cursorAccent: '#0b0f0a',
+      selectionBackground: 'rgba(124,255,178,0.35)',
+      black: '#0b0f0a', red: '#ff6b6b', green: '#7cffb2', yellow: '#ffd166',
+      blue: '#6ec6ff', magenta: '#d29bff', cyan: '#80ffea', white: '#dcffd6',
+      brightBlack: '#3a4a3a', brightRed: '#ff8080', brightGreen: '#a6ffc7',
+      brightYellow: '#ffe39a', brightBlue: '#a8d8ff', brightMagenta: '#e3bfff',
+      brightCyan: '#b2fff0', brightWhite: '#f3fff0',
+    },
+    allowTransparency: true,
+  });
+  const fit = new FitAddon.FitAddon();
+  term.loadAddon(fit);
+  term.open(document.getElementById('term'));
+  fit.fit();
+  try {
+    const webgl = new WebglAddon.WebglAddon();
+    webgl.onContextLoss(() => webgl.dispose());
+    term.loadAddon(webgl);
+  } catch (e) { /* canvas fallback */ }
+  window.addEventListener('resize', () => fit.fit());
+
+  const C = {
+    g: (s) => `\x1b[38;2;124;255;178m${s}\x1b[0m`,
+    d: (s) => `\x1b[38;2;74;122;74m${s}\x1b[0m`,
+    y: (s) => `\x1b[38;2;255;209;102m${s}\x1b[0m`,
+    r: (s) => `\x1b[38;2;255;107;107m${s}\x1b[0m`,
+    b: (s) => `\x1b[1m${s}\x1b[0m`,
+  };
+  const PROMPT = `${C.g('cgould')}${C.d('@')}${C.g('github.io')}${C.d(':')}${C.y('~')}${C.d('$ ')}`;
+  const write = (s) => term.write(s);
+  const writeln = (s = '') => term.writeln(s);
+
+  // Duck ANSI renderer: load PNG, downscale to `cols` × N/2 px, emit half-block
+  // truecolor ANSI. Transparent (alpha<128) or near-white pixels render as the
+  // terminal default — so the duck floats on the CRT background.
+  async function renderDuckAnsi(cols) {
+    try {
+      const img = new Image();
+      img.src = '../assets/ducksy.png';
+      await new Promise((res, rej) => { img.onload = res; img.onerror = rej; });
+      const rows = Math.max(1, Math.round(cols * (img.height / img.width) / 2));
+      const canvas = document.createElement('canvas');
+      canvas.width = cols;
+      canvas.height = rows * 2;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0, cols, rows * 2);
+      const data = ctx.getImageData(0, 0, cols, rows * 2).data;
+      const transparent = (r, g, b, a) =>
+        a < 128 || (r > 240 && g > 240 && b > 240);
+      const out = [];
+      // For each 1×2 pixel cell: four cases based on which half is transparent.
+      // `▀` paints fg on top, bg on bottom; `▄` paints fg on bottom, bg on top.
+      // To keep a transparent half truly transparent (revealing the CRT
+      // gradient behind), we must pick the glyph whose COLORED half matches
+      // the opaque pixel — otherwise a default-colored fg stripe bleeds
+      // through.
+      for (let y = 0; y < rows; y++) {
+        let row = '';
+        for (let x = 0; x < cols; x++) {
+          const it = ((y*2) * cols + x) * 4;
+          const ib = ((y*2+1) * cols + x) * 4;
+          const tt = transparent(data[it], data[it+1], data[it+2], data[it+3]);
+          const tb = transparent(data[ib], data[ib+1], data[ib+2], data[ib+3]);
+          const topRGB = `${data[it]};${data[it+1]};${data[it+2]}`;
+          const botRGB = `${data[ib]};${data[ib+1]};${data[ib+2]}`;
+          if (tt && tb)       row += '\x1b[39;49m ';
+          else if (tt && !tb) row += `\x1b[49m\x1b[38;2;${botRGB}m\u2584`;
+          else if (!tt && tb) row += `\x1b[49m\x1b[38;2;${topRGB}m\u2580`;
+          else                row += `\x1b[38;2;${topRGB}m\x1b[48;2;${botRGB}m\u2580`;
+        }
+        out.push(row + '\x1b[0m');
+      }
+      return out;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  // ---- fake fs ----
+  // Top-level files are deliberate: about.txt = human intro, readme.md = how
+  // the shell is built, links.txt = real pointers (only domains I own or
+  // are canonical upstream projects — no invented URLs).
+  const FS = {
+    'about.txt': [
+      `i'm ${identity.name.toLowerCase()} — embedded systems specialist.`,
+      `eight years of linux across ARM, RISC-V, and x86. a lot of time`,
+      `spent near FPGAs, radiation labs, and makefiles that take 40`,
+      `minutes to rebuild. currently co-founding VerifAi (AI verification).`,
+      '',
+      `this shell is a portfolio pretending to be a shell. try:`,
+      `  whoami        — the operator`,
+      `  neofetch      — the rig, with the duck`,
+      `  journalctl    — a career log, systemd-style`,
+      `  lspci -k      — drivers i've shipped`,
+      `  repo status   — what's cooking in the workspace`,
+      `  tmux          — attach a real linux vm in the browser`,
+      '',
+      `the duck runs this place. be nice to the duck.`,
+    ].join('\n'),
+    'readme.md': [
+      '# cgould @ github.io',
+      '',
+      'a terminal-shaped résumé. no backend; just static html + js +',
+      'a ~7 MB linux iso. works offline once loaded.',
+      '',
+      'stack:',
+      '  - xterm.js 5.3         (terminal emulator)',
+      '  - v86                  (x86 emu in wasm, BSD-2 — self-hosted)',
+      '  - seabios + vgabios    (firmware, shipped with v86)',
+      '  - custom linux cdrom   (~7.4 MB, same-origin)',
+      '  - ducksy.png           (runtime canvas → ansi half-block art)',
+      '',
+      'panes:',
+      '  [0] host   — js-sh, the shell you\'re typing at',
+      '  [1] linux  — real linux guest, attaches on `tmux` / `linux`',
+      '',
+      'source: github.com/DOCgould/DOCgould.github.io',
+    ].join('\n'),
+    'links.txt': [
+      '# me',
+      'https://github.com/DOCgould',
+      `mailto:${identity.email}`,
+      '',
+      '# tech this shell rides on',
+      'https://github.com/copy/v86              (x86 emulator in wasm)',
+      'https://github.com/xtermjs/xterm.js      (terminal renderer)',
+      'https://github.com/Xilinx/linux-xlnx     (upstream of the workspace kernel)',
+      '',
+      '# hints',
+      'type `whoami` for bio · `neofetch` for rig · `repo status` for workspace',
+    ].join('\n'),
+  };
+
+  // ================= tmux-style pane manager =================
+  // Two "panes": host (fake js-sh) and linux (v86 guest serial).
+  // Attach: keys route to emulator.serial0_send, serial output writes to term.
+  // Detach: keys route to host line editor, prompt redraws. Guest keeps running.
+  const STATE = {
+    mode: 'host',           // 'host' | 'attached'
+    emulator: null,         // v86 instance once booted
+    booting: false,         // true while v86 is starting up
+    prefixArmed: false,     // set after ctrl-b, consumes the next keystroke
+    hostLineSaved: '',      // preserve host line editor contents across detach
+    hostCursorSaved: 0,
+  };
+  const paneHostEl = document.getElementById('pane-host');
+  const paneLinuxEl = document.getElementById('pane-linux');
+  const renderStatusline = () => {
+    paneHostEl.classList.toggle('active', STATE.mode === 'host');
+    paneLinuxEl.classList.toggle('active', STATE.mode === 'attached');
+    if (STATE.booting) paneLinuxEl.textContent = '[1] linux (booting…)';
+    else if (STATE.emulator) paneLinuxEl.textContent = '[1] linux';
+    else paneLinuxEl.textContent = '[1] linux (inactive)';
+  };
+
+  const attachLinux = () => {
+    if (!STATE.emulator && !STATE.booting) {
+      writeln(C.r('no linux pane — type `linux` or `tmux` first'));
+      return;
+    }
+    STATE.hostLineSaved = line;
+    STATE.hostCursorSaved = cursor;
+    STATE.mode = 'attached';
+    renderStatusline();
+    write('\r\n' + C.d('[attached to linux pane — ctrl-b d to detach]') + '\r\n');
+  };
+  const detachLinux = (msg = '[detached]') => {
+    STATE.mode = 'host';
+    renderStatusline();
+    write('\r\n' + C.d(msg) + '\r\n');
+    line = STATE.hostLineSaved;
+    cursor = STATE.hostCursorSaved;
+    redraw();
+  };
+
+  const launchV86 = async () => {
+    if (STATE.emulator) { attachLinux(); return; }
+    if (STATE.booting) { attachLinux(); return; }
+    STATE.booting = true;
+    renderStatusline();
+    writeln(C.d('[v86] booting linux — output streams into this pane'));
+    attachLinux();
+    const hostTerm = { print: (s) => term.write(String(s).replace(/\r?\n/g, '\r\n')) };
+    try {
+      const emu = await bootV86(hostTerm, {
+        headless: true,
+        onSerialChar: (s) => { if (STATE.mode === 'attached') term.write(s); },
+      });
+      STATE.emulator = emu;
+    } catch (e) {
+      writeln(C.r(`[v86] boot failed: ${e?.message || e}`));
+    } finally {
+      STATE.booting = false;
+      renderStatusline();
+    }
+  };
+
+  // ---- commands ----
+  const banner = async () => {
+    const duck = await renderDuckAnsi(28);
+    writeln('');
+    if (duck) duck.forEach((r) => writeln('  ' + r));
+    writeln('');
+    writeln(C.g('   cgould // wasm terminal · linux-class · 100% client side'));
+    writeln('');
+    writeln(`  ${C.d('type')} ${C.b(C.y('help'))}${C.d(' for commands ·')} ${C.b(C.y('tmux'))}${C.d(' or ')}${C.b(C.y('linux'))}${C.d(' to attach a real linux guest')}`);
+    writeln('');
+  };
+
+  const neofetch = async () => {
+    const duck = await renderDuckAnsi(18);
+    // Uptime: years since embedded-linux career start (approx).
+    const careerStart = new Date('2018-05-01');
+    const years = ((Date.now() - careerStart) / (365.25 * 864e5)).toFixed(1);
+    const info = [
+      `${C.b('cgould')}${C.d('@')}${C.b('github.io')} — ${identity.name}`,
+      C.d('-----------------------------'),
+      `${C.y('Host')}       : Embedded Systems Specialist · AI interest · VerifAi Co-Founder`,
+      `${C.y('OS')}         : Linux (browser-hosted wasm)`,
+      `${C.y('CPU')}        : AMD Ryzen 7 8840U w/ Radeon 780M (8C/16T, Zen 4, XDNA NPU)`,
+      `${C.y('Kernel')}     : 6.8.0-amd8040u x86_64 #1 SMP PREEMPT_RT`,
+      `${C.y('Uptime')}     : ${years} yr (embedded linux, still counting)`,
+      `${C.y('Shell')}      : js-sh 0.1 (in-browser) · bash / zsh (meatspace)`,
+      `${C.y('Drivers')}    : polarfire_nand, usp_accel ×8, tegra_k1_tflite, verifai_ai`,
+      `${C.y('Interests')}  : AI/ML at the edge, verification, FPGA-accelerated Linux`,
+      `${C.y('Packages')}   : rust, c/c++, vhdl, python, yocto, rocm, xilinx hls`,
+      `${C.y('Term')}       : xterm.js 5.3 · v86 (x86, BSD-2)`,
+      `${C.y('Editor')}     : vi (attach the linux pane first — ${C.b('tmux')})`,
+      `${C.y('Contact')}    : ${identity.email}`,
+    ];
+    const n = Math.max(duck ? duck.length : 0, info.length);
+    for (let i = 0; i < n; i++) {
+      writeln('  ' + ((duck && duck[i]) || ' '.repeat(18)) + '  ' + (info[i] || ''));
+    }
+  };
+
+  const help = () => {
+    const rows = [
+      ['help',                    'show this help'],
+      ['ls / cat <f>',            'list / print fake fs files'],
+      [C.b('whoami') + ' / id',   'the operator — Christian Gould'],
+      [C.b('neofetch'),           'system info with ducksy + mission badge'],
+      [C.b('journalctl') + ' [-u X] [-n N]', 'career log, systemd-style'],
+      [C.b('lscpu') + ' / ' + C.b('lspci') + ' [-vk]', 'what this box thinks it has'],
+      [C.b('lsmod') + ' / modprobe',        'drivers (polarfire_nand, usp_accel ×8, tegra_k1_tflite…)'],
+      [C.b('tmux'),               'attach a linux pane (boots it on first call)'],
+      ['tmux attach',             'reattach to the running linux pane'],
+      ['linux / vim',             'alias for `tmux`'],
+      ['banner / ducksy',         'redraw banner / print the duck'],
+      ['clear',                   'clear the screen'],
+      ['date / pwd / uname -a',   'the usual'],
+      ['open <url>',              'open a url in a new tab'],
+    ];
+    writeln('');
+    rows.forEach(([c, d]) => writeln(`  ${C.g(c.padEnd(22))} ${C.d(d)}`));
+    writeln('');
+    writeln(`  ${C.d('while attached:')} ${C.y('ctrl-b d')}${C.d(' to detach, ')}${C.y('ctrl-b n')}${C.d(' to switch panes')}`);
+    writeln('');
+  };
+
+  // career timeline styled as a systemd journal. entries carry unit tags so
+  // `journalctl -u <unit>` can filter. tone: professionally terse, occasionally
+  // dry — like real journal output written by a sysadmin with a sense of humor.
+  const JOURNAL = [
+    { ts: 'Aug 24 2015 08:00:00', unit: 'education.service',            pid: 1,    msg: 'Starting SDSU — BS Applied Math (CS emphasis)...' },
+    { ts: 'Jan 18 2018 10:04:11', unit: 'ta-oop.service',               pid: 420,  msg: 'teaching-assistant: OOP C++/Python/Java; grading enabled' },
+    { ts: 'May 15 2019 15:30:00', unit: 'systemd[1]',                   pid: 1,    msg: 'education.service: Succeeded.' },
+    { ts: 'Sep 02 2019 09:15:00', unit: 'sdsu-auv.service',             pid: 1337, msg: 'Starting AUVSI RoboSub — Perseverance AUV team lead...' },
+    { ts: 'Sep 03 2019 11:47:32', unit: 'auv-perseverance[1337]',       pid: 1337, msg: 'OpenCV pipeline online, 30 fps sustained on Jetson TX2' },
+    { ts: 'Feb 14 2020 14:02:08', unit: 'auv-perseverance[1337]',       pid: 1337, msg: 'LXC+docker containers ready; ARM/PIC coprocessors ingesting sensors' },
+    { ts: 'Aug 10 2020 22:04:13', unit: 'auv-scion[1337]',              pid: 1337, msg: 'RoboSub 2020: paper submitted to AUVSI journal' },
+    { ts: 'Oct 05 2020 09:00:00', unit: 'systemd[1]',                   pid: 1,    msg: 'Starting innoflight-cfc.service — Compact Flight Computers...' },
+    { ts: 'Oct 05 2020 09:00:02', unit: 'innoflight-cfc.service',       pid: 2020, msg: 'Reached target RadiationHardened.target' },
+    { ts: 'Jun 15 2021 16:32:10', unit: 'systemd[1]',                   pid: 1,    msg: 'sdsu-auv.service: Deactivated successfully (graduated).' },
+    { ts: 'Aug 04 2021 14:22:09', unit: 'auv-pico[1337]',               pid: 1337, msg: 'RoboSub 2021: second paper shipped' },
+    { ts: 'Nov 02 2021 11:15:44', unit: 'kernel',                       pid: 0,    msg: '[   3.141592] cfc500: TFLite CUDA-6.5 delegate loaded (quant-aware model)' },
+    { ts: 'Nov 02 2021 11:15:45', unit: 'kernel',                       pid: 0,    msg: '[   3.141593] cfc500: dual-TK1 partition up; realtime split ok' },
+    { ts: 'Mar 14 2022 03:14:15', unit: 'kernel',                       pid: 0,    msg: '[  27.182818] rad-test: SEE heavy-ion pass @ 75 MeV·cm²/mg' },
+    { ts: 'Mar 14 2022 03:14:16', unit: 'kernel',                       pid: 0,    msg: '[  27.182819] rad-test: proton validation OK; no SEL observed' },
+    { ts: 'Jul 09 2022 10:45:02', unit: 'innoflight-mpe600.service',    pid: 600,  msg: 'MPE-600: multi-master comms online, 10-engineer team coordinated' },
+    { ts: 'Jan 20 2023 09:12:55', unit: 'innoflight-cfc510.service',    pid: 510,  msg: 'CFC510: ROCm-in-space inference hit orbit; first of its kind' },
+    { ts: 'Jan 20 2023 09:12:56', unit: 'innoflight-cfc510.service',    pid: 510,  msg: 'CFC510: FPGA-supervised DMA rollback armed' },
+    { ts: 'Apr 02 2023 13:40:01', unit: 'kernel',                       pid: 0,    msg: '[ 628.318530] cfc510: custom BIOS handoff → deterministic boot (LEO + GEO profiles)' },
+    { ts: 'Aug 11 2024 17:22:18', unit: 'innoflight-cfc600.service',    pid: 600,  msg: 'CFC600: AIE + DPU partitioning dynamic against live telemetry' },
+    { ts: 'Aug 11 2024 17:22:19', unit: 'innoflight-cfc600.service',    pid: 600,  msg: 'CFC600: software TMR across heterogeneous elements: ACTIVE' },
+    { ts: 'Dec 01 2024 02:00:00', unit: 'secureboot.service',           pid: 42,   msg: 'firmware update: cryptographic authentication OK, rollback fuse armed' },
+    { ts: 'Feb 29 2025 23:59:60', unit: 'kernel',                       pid: 0,    msg: '[ 999.999999] leap second inserted (rtc drift handled)' },
+    { ts: 'Apr 17 2026 01:30:00', unit: 'innoflight-cfc.service',       pid: 2020, msg: 'STATE: running — uptime 5y 6m; no unplanned reboots on current shift' },
+  ];
+
+  const journalctl = (args) => {
+    let filter = null;
+    let tail = null;
+    for (let i = 0; i < args.length; i++) {
+      const a = args[i];
+      if (a === '-u' || a === '--unit') filter = args[++i];
+      else if (a === '-n' || a === '--lines') tail = parseInt(args[++i], 10);
+      else if (a === '-f' || a === '--follow')
+        writeln(C.y('journalctl: -- follow not supported in this wasm journal; showing once --'));
+      else if (a === '--no-pager') { /* we always paginate never; tolerate */ }
+      else if (a.startsWith('-')) writeln(C.d(`journalctl: (ignoring ${a})`));
+    }
+    writeln('');
+    writeln(C.d('-- Logs begin Mon 2015-08-24 08:00:00 PDT, end Fri 2026-04-17 02:00:00 PDT. --'));
+    let rows = JOURNAL;
+    if (filter) rows = rows.filter(r => r.unit.includes(filter));
+    if (tail && tail > 0) rows = rows.slice(-tail);
+    if (!rows.length) {
+      writeln(C.d(`-- No entries for unit "${filter}". --`));
+      return;
+    }
+    const host = 'cgould.github.io';
+    for (const r of rows) {
+      const unit = r.unit.includes('[') ? r.unit : `${r.unit}[${r.pid}]`;
+      const tagC = r.unit === 'kernel' ? C.y(unit) : C.g(unit);
+      writeln(`  ${C.d(r.ts)} ${host} ${tagC}: ${r.msg}`);
+    }
+    writeln('');
+    writeln(C.d(`-- ${rows.length} entries · hint: `) + C.b('journalctl -u innoflight') + C.d(' · ') + C.b('journalctl -n 5') + C.d(' --'));
+    writeln('');
+  };
+
+  // ---- repo (Google's repo tool — multi-project workspace view) ----
+  // Grounded easter egg: the workspace itself lives under /srv/workspaces/verifai
+  // and the visitor has NO read access. But `repo` exposes manifest-level
+  // metadata over an RPC — branch names, modified file lists, last commit
+  // per project. Enough to see who's working on what without leaking source.
+  const WORKSPACE_ROOT = '/srv/workspaces/verifai';
+  const GIT_HEAD = 'verifai/accel-bringup';
+  const GIT_MODIFIED = [
+    'drivers/misc/verifai/Kconfig',
+    'drivers/misc/verifai/Makefile',
+    'drivers/misc/verifai/verifai_accel.c',
+    'drivers/misc/verifai/verifai_core.c',
+  ];
+  const GIT_UNTRACKED = [
+    'drivers/misc/verifai/TODO.md',
+    'drivers/misc/verifai/notes.txt',
+  ];
+
+  // Projects tracked by the repo manifest. The visitor sees metadata only —
+  // nothing from inside the project trees leaks through this interface.
+  const REPO_PROJECTS = [
+    { path: 'kernel/linux-xilinx',  name: 'linux-xilinx', branch: GIT_HEAD,
+      modified:  GIT_MODIFIED,
+      untracked: GIT_UNTRACKED,
+      last:  { h: 'a7f3e12', author: 'Christian Gould',   subject: 'WIP: verifai: accel: stub irq path + dma mapping' } },
+    { path: 'firmware/verifai-fw',  name: 'verifai-fw',   branch: 'main', clean: true,
+      last:  { h: '51ab9c3', author: 'Christian Gould',   subject: 'rom-loader: sign manifest w/ ed25519' } },
+    { path: 'u-boot/u-boot-xlnx',   name: 'u-boot-xlnx',  branch: 'xlnx_v2024.01',
+      modified: ['board/xilinx/versal/versal.c'],
+      last:  { h: 'abc9f12', author: 'Michal Simek',      subject: 'versal: fix GEM link-up with 2.5G SFP' } },
+    { path: 'tools/buildroot',      name: 'buildroot',    branch: '2024.02.x', clean: true,
+      last:  { h: '7782def', author: 'Buildroot Bot',     subject: 'Merge 2024.02.3 -> 2024.02.x' } },
+    { path: 'yocto/meta-verifai',   name: 'meta-verifai', branch: 'dunfell-verifai',
+      modified: ['recipes-kernel/verifai-accel/verifai-accel_git.bb'],
+      last:  { h: 'f12abcd', author: 'Christian Gould',   subject: 'recipes-kernel: verifai-accel: add .bb' } },
+    { path: 'yocto/meta-xilinx',    name: 'meta-xilinx',  branch: 'langdale', clean: true,
+      last:  { h: 'cc8823b', author: 'Sonal Santan',      subject: 'recipes-bsp: arm-trusted-firmware: bump' } },
+  ];
+
+  const repoCmd = (args) => {
+    const sub = args[0];
+    if (!sub || sub === 'help' || sub === '--help') {
+      writeln('');
+      writeln(C.d(`usage: repo <status|info|list|branches|forall|log|sync>`));
+      writeln(C.d(`workspace: ${WORKSPACE_ROOT} (metadata view only — source tree not readable)`));
+      writeln('');
+      return;
+    }
+    if (sub === 'status') {
+      writeln('');
+      for (const p of REPO_PROJECTS) {
+        writeln(`project ${C.g(p.path.padEnd(30))} branch ${C.y(p.branch)}`);
+        if (p.clean) writeln(`  ${C.d('(clean)')}`);
+        else {
+          (p.modified || []).forEach((f) => writeln(` ${C.r('-m')}     ${f}`));
+          (p.untracked || []).forEach((f) => writeln(` ${C.r('-?')}     ${f}`));
+        }
+        writeln('');
+      }
+      return;
+    }
+    if (sub === 'list') {
+      writeln('');
+      REPO_PROJECTS.forEach((p) => writeln(`  ${C.g(p.path.padEnd(28))} : ${p.name}`));
+      writeln('');
+      return;
+    }
+    if (sub === 'info') {
+      const p = args[1] ? REPO_PROJECTS.find((r) => r.path === args[1] || r.name === args[1]) : null;
+      writeln('');
+      if (!p) {
+        writeln(`${C.y('Manifest branch')}:       verifai/workspace`);
+        writeln(`${C.y('Manifest merge branch')}: refs/heads/verifai/workspace`);
+        writeln(`${C.y('Manifest groups')}:       kernel,firmware,tools,yocto`);
+        writeln(`${C.y('Manifest server')}:       ssh://gerrit.verifai.ai/manifests`);
+        writeln(`${C.y('Mount root')}:            ${WORKSPACE_ROOT}  ${C.d('(you do not have read access)')}`);
+        writeln('');
+        for (const proj of REPO_PROJECTS) {
+          const mark = proj.clean ? C.d('clean') : C.r('dirty');
+          writeln(`  ${C.g(proj.path.padEnd(28))} ${mark.padEnd(15)} ${C.y(proj.branch.padEnd(28))} last: ${C.d(proj.last.h)} ${proj.last.author}`);
+        }
+      } else {
+        writeln(`${C.y('Project')}:        ${p.path}`);
+        writeln(`${C.y('Mounted at')}:     ${WORKSPACE_ROOT}/${p.path} ${C.d('(denied)')}`);
+        writeln(`${C.y('Branch')}:         ${p.branch}`);
+        writeln(`${C.y('Last commit')}:    ${p.last.h} ${p.last.author}: ${p.last.subject}`);
+        if (p.modified)  writeln(`${C.y('Modified')}:       ${p.modified.length} file(s)`);
+        if (p.untracked) writeln(`${C.y('Untracked')}:      ${p.untracked.length} file(s)`);
+      }
+      writeln('');
+      return;
+    }
+    if (sub === 'branches') {
+      writeln('');
+      REPO_PROJECTS.forEach((p) =>
+        writeln(`  ${C.g(p.path.padEnd(30))} ${C.y(p.branch)}`)
+      );
+      writeln('');
+      writeln(C.d(`  (other local branches not exported over the manifest RPC)`));
+      writeln('');
+      return;
+    }
+    if (sub === 'log' || sub === 'forall') {
+      // `repo log` alias or `repo forall -c 'git log -1 ...'`
+      writeln('');
+      REPO_PROJECTS.forEach((p) => {
+        writeln(`${C.d('project')} ${C.g(p.path.padEnd(30))} ${C.y(p.last.h)} ${p.last.author}: ${p.last.subject}`);
+      });
+      writeln('');
+      return;
+    }
+    if (sub === 'diff') {
+      // Project-level summary: file counts + authors, not contents.
+      writeln('');
+      writeln(C.d(`(repo does not expose file contents over the manifest RPC — use git on the mount)`));
+      writeln('');
+      for (const p of REPO_PROJECTS) {
+        if (p.clean) continue;
+        const mcount = (p.modified || []).length;
+        const ucount = (p.untracked || []).length;
+        const files = [...(p.modified || []), ...(p.untracked || [])];
+        writeln(`${C.g(p.path)} ${C.d('→')} ${mcount} modified, ${ucount} untracked  ${C.d('·')} last: ${p.last.author}`);
+        files.forEach((f) => writeln(`  ${C.d(f)}`));
+        writeln('');
+      }
+      return;
+    }
+    if (sub === 'sync' || sub === 'upload' || sub === 'start') {
+      writeln(C.r(`repo: ${sub}: permission denied (read-only manifest view)`));
+      return;
+    }
+    writeln(C.r(`repo: unknown subcommand '${sub}'`));
+    writeln(C.d(`     try: status, info [project], list, branches, log, diff, forall`));
+  };
+
+  // `git` from the home dir isn't valid — the real workspace is elsewhere.
+  // Redirect the curious visitor toward `repo`.
+  const gitCmd = (args) => {
+    writeln(C.r('fatal: not a git repository (or any parent up to /home/cgould)'));
+    writeln(C.d(`hint: workspace is at ${C.b(WORKSPACE_ROOT)} but you don't have read access there.`));
+    writeln(C.d(`      try ${C.b('repo status')} for what's happening across projects.`));
+  };
+
+  // ---- lscpu / lspci / lsmod / modprobe ----
+  // Driver list is curated: these are the modules christian has actually
+  // worked on in real life (polarfire_nand = Microsemi PolarFire NAND driver;
+  // tegra_k1_tflite = Jetson TK1 TFLite GPU delegate; usp_accel = AMD
+  // Ultrascale+ FPGA fabric accelerator ×8; verifai_ai = VerifAi AI runtime).
+  const LSCPU = [
+    ['Architecture',             'x86_64'],
+    ['CPU op-mode(s)',           '32-bit, 64-bit'],
+    ['Byte Order',                'Little Endian'],
+    ['Address sizes',            '48 bits physical, 48 bits virtual'],
+    ['CPU(s)',                   '16'],
+    ['On-line CPU(s) list',      '0-15'],
+    ['Vendor ID',                'AuthenticAMD'],
+    ['Model name',               'AMD Ryzen 7 8840U w/ Radeon 780M Graphics'],
+    ['CPU family',               '26'],
+    ['Model',                    '117'],
+    ['Thread(s) per core',       '2'],
+    ['Core(s) per socket',       '8'],
+    ['Socket(s)',                '1'],
+    ['Stepping',                 '2'],
+    ['Frequency boost',          'enabled'],
+    ['CPU(s) scaling MHz',       '47%'],
+    ['CPU max MHz',              '5100.0000'],
+    ['CPU min MHz',              '400.0000'],
+    ['BogoMIPS',                 '6587.20'],
+    ['Flags',                    'fpu vme de pse tsc msr pae mce cx8 apic sep mtrr pge mca cmov pat pse36 clflush mmx fxsr sse sse2 ht syscall nx mmxext fxsr_opt pdpe1gb rdtscp lm constant_tsc rep_good amd_lbr_v2 nopl xtopology nonstop_tsc cpuid extd_apicid aperfmperf rapl pni pclmulqdq monitor ssse3 fma cx16 pcid sse4_1 sse4_2 x2apic movbe popcnt aes xsave avx f16c rdrand lahf_lm cmp_legacy svm cr8_legacy abm sse4a misalignsse 3dnowprefetch osvw ibs skinit wdt tce topoext perfctr_core perfctr_nb bpext perfctr_llc mwaitx cpb cat_l3 cdp_l3 hw_pstate ssbd mba perfmon_v2 ibrs ibpb stibp vmmcall fsgsbase bmi1 avx2 smep bmi2 erms invpcid cqm rdt_a avx512f avx512dq rdseed adx smap avx512ifma clflushopt clwb avx512cd sha_ni avx512bw avx512vl xsaveopt xsavec xgetbv1 xsaves cqm_llc cqm_occup_llc cqm_mbm_total cqm_mbm_local user_shstk avx512_bf16 clzero irperf xsaveerptr rdpru wbnoinvd cppc arat npt lbrv svm_lock nrip_save tsc_scale vmcb_clean flushbyasid decodeassists pausefilter pfthreshold v_vmsave_vmload vgif x2avic v_spec_ctrl avx512vbmi umip pku ospke avx512_vbmi2 gfni vaes vpclmulqdq avx512_vnni avx512_bitalg avx512_vpopcntdq rdpid bus_lock_detect movdiri movdir64b overflow_recov succor smca flush_l1d amd_lbr_pmc_freeze'],
+    ['Virtualization features',  ''],
+    [' Virtualization',          'AMD-V'],
+    ['Caches (sum of all)',      ''],
+    [' L1d',                     '256 KiB (8 instances)'],
+    [' L1i',                     '256 KiB (8 instances)'],
+    [' L2',                      '8 MiB (8 instances)'],
+    [' L3',                      '16 MiB (1 instance)'],
+    ['NUMA',                     ''],
+    [' NUMA node(s)',            '1'],
+    [' NUMA node0 CPU(s)',       '0-15'],
+  ];
+
+  const lscpu = (args) => {
+    if (args[0] === '-e' || args[0] === '--extended') {
+      writeln(C.d('  CPU NODE SOCKET CORE L1d L1i L2 L3 ONLINE'));
+      for (let i = 0; i < 16; i++) {
+        const core = Math.floor(i / 2);
+        writeln(`    ${String(i).padStart(2)}    0      0   ${String(core).padStart(2)}  ${core}   ${core}  ${core}  0    yes`);
+      }
+      return;
+    }
+    if (args[0] === '-J' || args[0] === '--json') {
+      writeln(C.d('  { "lscpu": "not actually json — tell `jc` to shove it" }'));
+      return;
+    }
+    writeln('');
+    for (const [k, v] of LSCPU) writeln(`  ${C.y(k.padEnd(26))} ${v}`);
+    writeln('');
+  };
+
+  const PCI = [
+    { slot: '00:00.0', cls: 'Host bridge',                  vendor: 'AMD',      name: 'Hawk Point-U Root Complex',                              driver: null,                 mods: [] },
+    { slot: '00:02.0', cls: 'PCI bridge',                   vendor: 'AMD',      name: 'Hawk Point GPP Bridge [x16 → FPGA fabric]',              driver: 'pcieport',           mods: ['pcieport'] },
+    { slot: '00:02.1', cls: 'PCI bridge',                   vendor: 'AMD',      name: 'Hawk Point GPP Bridge [x4 → PolarFire]',                 driver: 'pcieport',           mods: ['pcieport'] },
+    { slot: '00:08.0', cls: 'VGA compatible controller',    vendor: 'AMD/ATI',  name: 'Radeon 780M Graphics (RDNA 3)',                          driver: 'amdgpu',             mods: ['amdgpu'] },
+    { slot: '00:08.1', cls: 'Audio device',                 vendor: 'AMD',      name: 'ACP Audio Co-Processor',                                 driver: 'snd_hda_intel',      mods: ['snd_hda_intel'] },
+    { slot: '00:14.0', cls: 'USB controller',               vendor: 'AMD',      name: 'FCH USB 3.2 Host Controller',                            driver: 'xhci_hcd',           mods: ['xhci_hcd'] },
+    { slot: '00:18.0', cls: 'Host bridge',                  vendor: 'AMD',      name: 'Ryzen 8040 Data Fabric',                                 driver: null,                 mods: [] },
+    { slot: '01:00.0', cls: 'Signal processing controller', vendor: 'AMD',      name: 'XDNA AI Engine (Ryzen AI NPU)',                          driver: 'amd_xdna',           mods: ['amd_xdna'] },
+    { slot: '02:00.0', cls: 'Non-Volatile memory controller', vendor: 'Samsung', name: 'NVMe SSD 990 Pro 2TB',                                  driver: 'nvme',               mods: ['nvme'] },
+    { slot: '03:00.0', cls: 'Network controller',           vendor: 'MediaTek', name: 'MT7922 Wi-Fi 6E / BT 5.3',                               driver: 'mt7921e',            mods: ['mt7921e'] },
+    { slot: '04:00.0', cls: 'Processing accelerators',      vendor: 'Xilinx',   name: 'Zynq UltraScale+ ZU15EG FPGA [fabric 1/8]',              driver: 'usp_accel',          mods: ['usp_accel','xilinx_dma'] },
+    { slot: '04:01.0', cls: 'Processing accelerators',      vendor: 'Xilinx',   name: 'Zynq UltraScale+ ZU15EG FPGA [fabric 2/8]',              driver: 'usp_accel',          mods: ['usp_accel','xilinx_dma'] },
+    { slot: '04:02.0', cls: 'Processing accelerators',      vendor: 'Xilinx',   name: 'Zynq UltraScale+ ZU15EG FPGA [fabric 3/8]',              driver: 'usp_accel',          mods: ['usp_accel','xilinx_dma'] },
+    { slot: '04:03.0', cls: 'Processing accelerators',      vendor: 'Xilinx',   name: 'Zynq UltraScale+ ZU15EG FPGA [fabric 4/8]',              driver: 'usp_accel',          mods: ['usp_accel','xilinx_dma'] },
+    { slot: '04:04.0', cls: 'Processing accelerators',      vendor: 'Xilinx',   name: 'Zynq UltraScale+ ZU15EG FPGA [fabric 5/8]',              driver: 'usp_accel',          mods: ['usp_accel','xilinx_dma'] },
+    { slot: '04:05.0', cls: 'Processing accelerators',      vendor: 'Xilinx',   name: 'Zynq UltraScale+ ZU15EG FPGA [fabric 6/8]',              driver: 'usp_accel',          mods: ['usp_accel','xilinx_dma'] },
+    { slot: '04:06.0', cls: 'Processing accelerators',      vendor: 'Xilinx',   name: 'Zynq UltraScale+ ZU15EG FPGA [fabric 7/8]',              driver: 'usp_accel',          mods: ['usp_accel','xilinx_dma'] },
+    { slot: '04:07.0', cls: 'Processing accelerators',      vendor: 'Xilinx',   name: 'Zynq UltraScale+ ZU15EG FPGA [fabric 8/8]',              driver: 'usp_accel',          mods: ['usp_accel','xilinx_dma'] },
+    { slot: '05:00.0', cls: 'Non-Volatile memory controller', vendor: 'Microsemi', name: 'PolarFire MPF300T NAND Controller [custom driver]',   driver: 'polarfire_nand',     mods: ['polarfire_nand','ubi','ubifs'] },
+    { slot: '06:00.0', cls: 'Processing accelerators',      vendor: 'NVIDIA',   name: 'Tegra K1 (TK1) PCIe Bridge [legacy test rig]',           driver: 'tegra_k1_tflite',    mods: ['tegra_k1_tflite','nvidia_tegra'] },
+    { slot: '07:00.0', cls: 'Unassigned class',             vendor: 'VerifAi',  name: 'AI Verification Accelerator (Co-Founder bring-up)',      driver: 'verifai_ai',         mods: ['verifai_ai'] },
+  ];
+
+  const lspci = (args) => {
+    const flags = { v: false, k: false, nn: false, t: false, s: null };
+    for (let i = 0; i < args.length; i++) {
+      const a = args[i];
+      if (a === '-v' || a === '-vv' || a === '-vvv') flags.v = true;
+      else if (a === '-k') flags.k = true;
+      else if (a === '-nn') flags.nn = true;
+      else if (a === '-t') flags.t = true;
+      else if (a === '-s') flags.s = args[++i];
+      else if (a.startsWith('-s')) flags.s = a.slice(2);
+    }
+    if (flags.t) {
+      writeln('');
+      writeln('  ' + C.d('-[0000:00]') + '-+-00.0  AMD Hawk Point-U Root Complex');
+      writeln('                 ' + C.d('+-02.0') + '-[01]----00.0  AMD XDNA AI Engine');
+      writeln('                 ' + C.d('+-02.0') + '-[04-04]--+-00.0  Xilinx Zynq UltraScale+ ZU15EG [fabric 1/8]');
+      writeln('                 ' + C.d('         |      '     ) + '+-...7.0  Xilinx Zynq UltraScale+ ZU15EG [fabric 8/8]');
+      writeln('                 ' + C.d('+-02.1') + '-[05]----00.0  Microsemi PolarFire MPF300T NAND (custom)');
+      writeln('                 ' + C.d('+-08.0') + '        AMD Radeon 780M');
+      writeln('                 ' + C.d('+-08.1') + '        AMD ACP Audio');
+      writeln('                 ' + C.d('\\-...') + '    Tegra K1 bridge, VerifAi AI accel, NVMe, Wi-Fi 6E');
+      writeln('');
+      return;
+    }
+    writeln('');
+    const list = flags.s ? PCI.filter((d) => d.slot.startsWith(flags.s)) : PCI;
+    for (const d of list) {
+      const id = flags.nn ? ` [${Math.floor(Math.random()*0xffff).toString(16).padStart(4,'0')}:${Math.floor(Math.random()*0xffff).toString(16).padStart(4,'0')}]` : '';
+      writeln(`  ${C.y(d.slot)} ${C.g(d.cls)}: ${d.vendor} ${d.name}${id}`);
+      if ((flags.v || flags.k) && d.driver) {
+        writeln(`    ${C.d('Kernel driver in use:')} ${C.b(d.driver)}`);
+        if (d.mods.length) writeln(`    ${C.d('Kernel modules:')} ${d.mods.join(', ')}`);
+      }
+    }
+    writeln('');
+    if (!flags.k && !flags.v) {
+      writeln('  ' + C.d('hint: `lspci -k` to show drivers · `lspci -t` for the tree · `lspci -s 04:` to filter'));
+      writeln('');
+    }
+  };
+
+  const MODULES = [
+    { name: 'polarfire_nand',   size: 142848,   used: 2,  refs: 'ubi,ubifs' },
+    { name: 'tegra_k1_tflite',  size: 98304,    used: 1,  refs: 'nvidia_tegra' },
+    { name: 'usp_accel',        size: 376320,   used: 8,  refs: 'xilinx_dma' },
+    { name: 'xilinx_dma',       size: 61440,    used: 8,  refs: '' },
+    { name: 'verifai_ai',       size: 524288,   used: 0,  refs: '' },
+    { name: 'amd_xdna',         size: 172032,   used: 1,  refs: '' },
+    { name: 'nvidia_tegra',     size: 208896,   used: 1,  refs: '' },
+    { name: 'amdgpu',           size: 10207232, used: 32, refs: 'gpu_sched,drm_display_helper,ttm,drm_buddy' },
+    { name: 'ubifs',            size: 507904,   used: 1,  refs: '' },
+    { name: 'ubi',              size: 180224,   used: 1,  refs: 'ubifs' },
+    { name: 'nvme',             size: 73728,    used: 2,  refs: '' },
+    { name: 'xhci_hcd',         size: 303104,   used: 0,  refs: '' },
+    { name: 'mt7921e',          size: 32768,    used: 0,  refs: '' },
+  ];
+
+  const lsmod = () => {
+    writeln('');
+    writeln(C.y('  Module                  Size  Used by'));
+    for (const m of MODULES) {
+      writeln(`  ${C.g(m.name.padEnd(20))} ${String(m.size).padStart(8)}  ${m.used}${m.refs ? ' ' + m.refs : ''}`);
+    }
+    writeln('');
+  };
+
+  const modprobe = (args) => {
+    if (!args[0]) {
+      writeln(C.r('modprobe: missing module name (try: ') + C.b('modprobe polarfire_nand') + C.r(')'));
+      return;
+    }
+    const remove = args[0] === '-r' || args[0] === '--remove';
+    const name = remove ? args[1] : args[0];
+    if (!name) { writeln(C.r('modprobe: missing module name after -r')); return; }
+    const mod = MODULES.find((m) => m.name === name);
+    if (!mod) {
+      writeln(C.r(`modprobe: FATAL: Module ${name} not found in directory /lib/modules/6.8.0-amd8040u`));
+      writeln(C.d('  available custom drivers: polarfire_nand, tegra_k1_tflite, usp_accel, verifai_ai'));
+      return;
+    }
+    if (remove) {
+      if (mod.used > 0) {
+        writeln(C.r(`modprobe: FATAL: Module ${name} is in use (${mod.used} users).`));
+      } else {
+        writeln(C.d(`  ${name} removed.`));
+      }
+    } else {
+      writeln(C.d(`  ${name}: already loaded (size ${mod.size}, used by ${mod.used})`));
+    }
+  };
+
+  const tmuxCmd = (args) => {
+    if (args[0] === 'ls') {
+      writeln(C.g('  [0] host')  + (STATE.mode === 'host' ? C.y(' *') : ''));
+      writeln(C.g('  [1] linux') + (STATE.mode === 'attached' ? C.y(' *') : '') +
+              (STATE.booting ? C.d(' (booting)') : STATE.emulator ? C.d(' (running)') : C.d(' (inactive)')));
+      return;
+    }
+    if (args[0] === 'kill') {
+      if (STATE.emulator) {
+        try { STATE.emulator.destroy?.(); } catch {}
+        STATE.emulator = null;
+        renderStatusline();
+        writeln(C.d('linux pane killed'));
+      } else writeln(C.r('no linux pane running'));
+      return;
+    }
+    // default: attach (boot if needed)
+    return launchV86();
+  };
+
+  const cmds = {
+    help, '?': help,
+    clear: () => term.clear(),
+    banner,
+    neofetch, fetch: neofetch,
+    ducksy: async () => {
+      const d = await renderDuckAnsi(40);
+      writeln('');
+      if (d) d.forEach((r) => writeln('  ' + r)); else writeln(C.r('duck unavailable'));
+      writeln('');
+    },
+    ls: () => writeln('  ' + Object.keys(FS).map(C.g).join('   ')),
+    cat: (args) => {
+      if (!args[0]) return writeln(C.r('cat: missing file'));
+      if (args[0].startsWith('projects') || args[0].startsWith('/srv/workspaces'))
+        return writeln(C.r(`cat: ${args[0]}: Permission denied`));
+      const f = FS[args[0]];
+      if (f === undefined) return writeln(C.r(`cat: ${args[0]}: no such file`));
+      // xterm treats LF as line-feed only (no CR), so split and writeln each
+      // line to get proper left-aligned wrapping for multi-line strings.
+      f.split('\n').forEach((line) => writeln(line));
+    },
+    echo: (args) => writeln(args.join(' ')),
+    date: () => writeln(new Date().toString()),
+    whoami: () => {
+      writeln('  ' + C.g('cgould'));
+      writeln('');
+      writeln('  ' + C.d('$ id'));
+      writeln('  uid=1000(cgould) gid=1000(cgould) groups=1000(cgould),27(sudo),80(yocto),90(rust),100(fpga),199(radhard)');
+      writeln('  ' + C.d('$ getent passwd cgould'));
+      writeln(`  cgould:x:1000:1000:${identity.name},,,${identity.email}:/home/cgould:/bin/js-sh`);
+      writeln('');
+      writeln('  ' + C.d('# /etc/motd'));
+      writeln('  ' + C.y('>') + ' ' + identity.pitch);
+      writeln('  ' + C.y('>') + ' ~8 yr in embedded linux. daily driver: yocto. usually within');
+      writeln('  ' + C.y('>') + ' petting distance of an FPGA and a radiation chamber.');
+      writeln('  ' + C.y('>'));
+      writeln('  ' + C.y('>') + ' current shift: innoflight (CFC-class). past tours: sdsu mechatronics AUV.');
+      writeln('  ' + C.y('>') + ' more: ' + C.b('journalctl -u innoflight') + C.d(' · ') + C.b('neofetch') + C.d(' · ') + C.b('cat /proc/christian/bio.txt'));
+      writeln('');
+    },
+    id: () => cmds.whoami(),
+    pwd: () => writeln('  /home/cgould'),
+    uname: (args) => {
+      if (args[0] === '-a')
+        writeln('  Linux cgould.github.io 6.8.0-amd8040u #1 SMP PREEMPT_RT Fri Apr 17 01:00:00 UTC 2026 x86_64 x86_64 x86_64 GNU/Linux');
+      else if (args[0] === '-r') writeln('  6.8.0-amd8040u');
+      else if (args[0] === '-m') writeln('  x86_64');
+      else writeln('  Linux');
+    },
+    open: (args) => {
+      if (!args[0]) return writeln(C.r('open: missing url'));
+      window.open(args[0], '_blank', 'noopener');
+      writeln(C.d(`opening ${args[0]}…`));
+    },
+    journalctl: (args) => journalctl(args),
+    git: (args) => gitCmd(args),
+    repo: (args) => repoCmd(args),
+    cd: (args) => {
+      const t = args[0] || '~';
+      if (t === '~' || t === '/home/cgould' || t === '.') return;
+      if (t.startsWith('/srv/workspaces') || t.startsWith('projects') || t.startsWith('/srv'))
+        return writeln(C.r(`cd: ${t}: Permission denied`));
+      writeln(C.r(`cd: ${t}: No such file or directory`));
+    },
+    lscpu: (args) => lscpu(args),
+    lspci: (args) => lspci(args),
+    lsmod: () => lsmod(),
+    modprobe: (args) => modprobe(args),
+    rmmod: (args) => modprobe(['-r', ...args]),
+    dmesg: () => { writeln(C.d('  dmesg: this is the host shell; attach the linux pane (`tmux`) and run dmesg there.')); },
+    tmux:    (args) => tmuxCmd(args),
+    linux:   () => launchV86(),
+    vim:     () => launchV86(),
+    vi:      () => launchV86(),
+    qemu:    () => launchV86(),
+    alpine:  () => launchV86(),
+    apk: () => {
+      writeln(C.y('apk:') + ' this browser shell has no package manager.');
+      writeln(C.d('     attach the linux pane (tmux / linux) and run apk there.'));
+    },
+    sudo: () => writeln(C.y(`[sudo] you are not in the sudoers file. this incident will be reported. (jk)`)),
+    exit: () => writeln(C.d('there is no exit. it is wasm all the way down.')),
+  };
+
+  // ---- line editor (host mode) ----
+  let line = '';
+  let cursor = 0;
+  const history = [];
+  let histIdx = 0;
+
+  const redraw = () => {
+    write('\r\x1b[2K');
+    write(PROMPT);
+    write(line);
+    if (cursor < line.length) write(`\x1b[${line.length - cursor}D`);
+  };
+
+  let busy = false;
+  const run = async (raw) => {
+    const trimmed = raw.trim();
+    if (!trimmed) { write('\r\n'); return; }
+    write('\r\n');
+    history.push(trimmed);
+    histIdx = history.length;
+    const [name, ...args] = trimmed.split(/\s+/);
+    const fn = cmds[name];
+    if (fn) {
+      try { await fn(args); } catch (e) { writeln(C.r(`error: ${e.message}`)); }
+    } else {
+      writeln(`  ${C.r(name)}: command not found · try ${C.y('help')}`);
+    }
+  };
+
+  // ---- key router ----
+  term.onData((data) => {
+    // Attached mode: prefix key (ctrl-b = 0x02) arms; next char is a tmux cmd.
+    // Otherwise all bytes go to the guest serial.
+    if (STATE.mode === 'attached') {
+      if (STATE.prefixArmed) {
+        STATE.prefixArmed = false;
+        const c = data[0]?.toLowerCase();
+        if (c === 'd') { detachLinux('[detached]'); return; }
+        if (c === 'n' || c === 'p' || c === '0' || c === '1') {
+          // We only have two panes; 'n'/'p'/'0' all behave like detach.
+          if (c === '1') return; // already here
+          detachLinux('[switched to host]');
+          return;
+        }
+        // unknown prefix char — swallow to match tmux behavior
+        return;
+      }
+      if (data.length === 1 && data.charCodeAt(0) === 0x02) {
+        STATE.prefixArmed = true;
+        return;
+      }
+      // Forward raw bytes to the guest.
+      if (STATE.emulator && typeof STATE.emulator.serial0_send === 'function') {
+        STATE.emulator.serial0_send(data);
+      }
+      return;
+    }
+
+    // Host mode: the original js-sh line editor.
+    for (let i = 0; i < data.length; i++) {
+      const ch = data[i];
+      const code = data.charCodeAt(i);
+      if (ch === '\x1b' && data[i+1] === '[') {
+        const seq = data[i+2];
+        if (seq === 'A') {
+          if (history.length && histIdx > 0) {
+            histIdx--; line = history[histIdx]; cursor = line.length; redraw();
+          }
+        } else if (seq === 'B') {
+          if (histIdx < history.length - 1) {
+            histIdx++; line = history[histIdx]; cursor = line.length; redraw();
+          } else {
+            histIdx = history.length; line = ''; cursor = 0; redraw();
+          }
+        } else if (seq === 'C') {
+          if (cursor < line.length) { cursor++; write('\x1b[C'); }
+        } else if (seq === 'D') {
+          if (cursor > 0) { cursor--; write('\x1b[D'); }
+        }
+        i += 2; continue;
+      }
+      if (ch === '\r') {
+        if (busy) continue;
+        const submitted = line;
+        line = ''; cursor = 0;
+        busy = true;
+        run(submitted).finally(() => {
+          busy = false;
+          if (STATE.mode === 'host') write(PROMPT);
+        });
+      } else if (code === 127 || ch === '\b') {
+        if (cursor > 0) {
+          line = line.slice(0, cursor - 1) + line.slice(cursor);
+          cursor--;
+          redraw();
+        }
+      } else if (ch === '\x03') {
+        write('^C\r\n');
+        line = ''; cursor = 0;
+        write(PROMPT);
+      } else if (ch === '\x0c') {
+        term.clear();
+        write(PROMPT + line);
+      } else if (ch === '\t') {
+        const pool = Object.keys(cmds).concat(Object.keys(FS));
+        const head = line.slice(0, cursor);
+        const m = head.match(/(\S*)$/);
+        const partial = m ? m[1] : '';
+        if (partial) {
+          const hits = pool.filter(p => p.startsWith(partial));
+          if (hits.length === 1) {
+            const ins = hits[0].slice(partial.length);
+            line = line.slice(0, cursor) + ins + line.slice(cursor);
+            cursor += ins.length;
+            redraw();
+          } else if (hits.length > 1) {
+            write('\r\n  ' + hits.map(C.d).join('  ') + '\r\n');
+            redraw();
+          }
+        }
+      } else if (code >= 32) {
+        line = line.slice(0, cursor) + ch + line.slice(cursor);
+        cursor++;
+        redraw();
+      }
+    }
+  });
+
+  await banner();
+  write(PROMPT);
+  term.focus();
+  renderStatusline();
+})();
+</script>
+</body>
+</html>
